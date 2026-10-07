@@ -10,11 +10,9 @@ public class SaberSlicer : MonoBehaviour
     private Vector3 exitPoint;
     private bool isInsideCube = false;
     private GameManager GM;
-    private Vector3 face_dir;
     private void Start()
     {
         GM = GameManager.instance;
-        face_dir = new Vector3(0, 0, 1);
     }
     private void OnTriggerEnter(Collider other)
     { 
@@ -43,7 +41,7 @@ public class SaberSlicer : MonoBehaviour
     {
         Vector3 sliceDirection = exitPoint - entryPoint;
         Debug.Log("@@@@@@@@@@@@ sliceDirection: " + sliceDirection); // -0.2x left, 0.2x right, -0.2y down, 0.2y up
-        Vector3 planeNormal = Vector3.Cross(sliceDirection, face_dir).normalized; // Camera.main.transform.forward
+        Vector3 planeNormal = Vector3.Cross(sliceDirection, Camera.main.transform.forward).normalized;
         Vector3 planePosition = (entryPoint + exitPoint) / 2f;
         SlicedHull slicedHull = target.Slice(planePosition, planeNormal, crossSectionMaterial);
         if (slicedHull == null) // 修復平面，切割位置設為中心

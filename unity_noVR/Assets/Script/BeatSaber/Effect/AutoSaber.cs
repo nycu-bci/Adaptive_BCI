@@ -1,7 +1,8 @@
-ï»¿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using static Oculus.Interaction.Context;
 
 public class AutoSaber : MonoBehaviour
 {
@@ -13,10 +14,10 @@ public class AutoSaber : MonoBehaviour
     public float scale_x = 0.3f;
     public float offset_y = 2f;
     public float swingDuration = 0.3f; // seconds to swing
-    public float delay_time = 2.5f;  // forward.cs ç§»å‹•æ™‚é–“ç¸½å…± 1.5
+    public float delay_time = 2.5f;  // forward.cs ²¾°Ê®É¶¡Á`¦@ 1.5
     public float swingAngleZ = 60f; // 
-    public float swingAngleY = 45f; // ä¸»è¦å‹•é€™å€‹ï¼Œæ®å‹•è§’åº¦
-    public float swing_time = 1f; // æ®å‹•æ¬¡æ•¸
+    public float swingAngleY = 45f; // ¥D­n°Ê³o­Ó¡A´§°Ê¨¤«×
+    public float swing_time = 1f; // ´§°Ê¦¸¼Æ
 
     public int correct_hit = 0;
     public int wrong_hit = 0;
@@ -46,34 +47,34 @@ public class AutoSaber : MonoBehaviour
         GM = GameManager.instance;
         GM.onAutoSaberCallback += MoveAndSwingSaberToNote;
     }
-    public IEnumerator MoveAndSwingSaberToNote(int note_x, int note_y, int note_direction, bool use_brain_to_controll) // ç›®å‰åœ¨ BeatmapSpawner è§¸ç™¼ (update)
+    public IEnumerator MoveAndSwingSaberToNote(int note_x, int note_y, int note_direction, bool use_brain_to_controll) // ¥Ø«e¦b BeatmapSpawner Ä²µo (update)
     {
         yield return new WaitForSeconds(delay_time);
-        if (note_x == 1) saber = saberL; // 1 æ˜¯å·¦é‚Š 2 æ˜¯å³é‚Š
+        if (note_x == 1) saber = saberL; // 1 ¬O¥ªÃä 2 ¬O¥kÃä
         else saber = saberR;
         
-        // 1. è¨ˆç®—ä¸–ç•Œåº§æ¨™ä½ç½®
+        // 1. ­pºâ¥@¬É®y¼Ğ¦ì¸m
         Vector3 targetPos = new Vector3(note_x * scale_x - offset_x, note_y - offset_y, spawnZ);
-        // é †ä¾¿æ—‹è½‰åŠ
+        // ¶¶«K±ÛÂà¼C
         Quaternion startRot = saber.rotation;
         Quaternion endRot = startRot * GetSwingYaw(note_direction);
-        // 2. å°‡ Saber ç§»å‹•åˆ° note ä¸Šæ–¹
+        // 2. ±N Saber ²¾°Ê¨ì note ¤W¤è
         //  saber.position = targetPos + GetStartOffset(note_direction);
         // saber.rotation = GetSwingRotation(note_direction);
 
-        // 3. æ®ç å‹•ç•«ï¼ˆç§»å‹•åˆ° note ä¸­å¿ƒï¼‰
+        // 3. ´§¬å°Êµe¡]²¾°Ê¨ì note ¤¤¤ß¡^
         for (int i = 0; i < swing_time; i++)
         {
-            if (use_brain_to_controll)  // ç›®å‰è¨­å®š group æœ€å¾Œä¸€å€‹ç‚ºç”¨è…¦æ³¢æ§åˆ¶
+            if (use_brain_to_controll)  // ¥Ø«e³]©w group ³Ì«á¤@­Ó¬°¥Î¸£ªi±±¨î
             {
                 if (GM.use_LSL_to_controll_saber)
                 {
                     int count1 = 0;
                     float totalWeight = 0f;
 
-                    float minWeight = 1f;   // æœ€èˆŠè³‡æ–™çš„æ¬Šé‡
-                    float maxWeight = 5f;  // æœ€æ–°è³‡æ–™çš„æ¬Šé‡
-                    bool useExponential = false; // true = æŒ‡æ•¸éå¢, false = ç·šæ€§éå¢
+                    float minWeight = 1f;   // ³ÌÂÂ¸ê®ÆªºÅv­«
+                    float maxWeight = 5f;  // ³Ì·s¸ê®ÆªºÅv­«
+                    bool useExponential = false; // true = «ü¼Æ»¼¼W, false = ½u©Ê»¼¼W
 
                     int ii = 0;
                     int n = tcp_predict.valueHistory.Count;
@@ -97,7 +98,7 @@ public class AutoSaber : MonoBehaviour
                         else
                         {
                             wrong_hit += 1;
-                            break; // æ®ç éŒ¯èª¤è·³é // åªæä¾›æ­£å‘ feedback
+                            break; // ´§¬å¿ù»~¸õ¹L // ¥u´£¨Ñ¥¿¦V feedback
                         }
                     }
                     else
@@ -106,7 +107,7 @@ public class AutoSaber : MonoBehaviour
                         if (note_x == 1)
                         {
                             wrong_hit += 1;
-                            break; // æ®ç éŒ¯èª¤è·³é // åªæä¾›æ­£å‘ feedback
+                            break; // ´§¬å¿ù»~¸õ¹L // ¥u´£¨Ñ¥¿¦V feedback
                         }
                         else correct_hit += 1;
                     }
@@ -126,7 +127,7 @@ public class AutoSaber : MonoBehaviour
                 yield return null;
             }
             saber.position = endPos; saber.rotation = endRot;
-            // å¾€å›ç 
+            // ©¹¦^¬å
             t = 0f;
             while (t < swingDuration)
             {
@@ -143,14 +144,14 @@ public class AutoSaber : MonoBehaviour
     {
         switch (direction)
         {
-            case 2: return Quaternion.Euler(0, -swingAngleY, -swingAngleZ / 2);  // å¾å·¦å¾€å³
-            case 3: return Quaternion.Euler(0, swingAngleY, -swingAngleZ / 2);   // å¾å³å¾€å·¦
-            case 1: return Quaternion.Euler(-swingAngleY, 0, -swingAngleZ / 2);    // å¾ä¸Šå¾€ä¸‹
-            case 0: return Quaternion.Euler(swingAngleY, 0, -swingAngleZ / 2);  // å¾ä¸‹å¾€ä¸Š
-            default: return Quaternion.Euler(swingAngleY, 0, -swingAngleZ / 2);   // é è¨­å¾ä¸Šå¾€ä¸‹
+            case 2: return Quaternion.Euler(0, -swingAngleY, -swingAngleZ / 2);  // ±q¥ª©¹¥k
+            case 3: return Quaternion.Euler(0, swingAngleY, -swingAngleZ / 2);   // ±q¥k©¹¥ª
+            case 1: return Quaternion.Euler(-swingAngleY, 0, -swingAngleZ / 2);    // ±q¤W©¹¤U
+            case 0: return Quaternion.Euler(swingAngleY, 0, -swingAngleZ / 2);  // ±q¤U©¹¤W
+            default: return Quaternion.Euler(swingAngleY, 0, -swingAngleZ / 2);   // ¹w³]±q¤W©¹¤U
         }
     }
-    // æ ¹æ“š direction å–å¾—é–‹å§‹ offsetï¼ˆè®“ saber å¾ç æ“Šæ–¹å‘ä¾†ï¼‰
+    // ®Ú¾Ú direction ¨ú±o¶}©l offset¡]Åı saber ±q¬åÀ»¤è¦V¨Ó¡^
     Vector3 GetStartOffset(int direction)
     {
         switch (direction)
@@ -167,7 +168,7 @@ public class AutoSaber : MonoBehaviour
         }
     }
 
-    // æ ¹æ“š direction çµ¦ Saber ä¸€å€‹æ—‹è½‰æ–¹å‘
+    // ®Ú¾Ú direction µ¹ Saber ¤@­Ó±ÛÂà¤è¦V
     Quaternion GetSwingRotation(int direction)
     {
         switch (direction)
