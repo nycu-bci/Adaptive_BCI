@@ -237,7 +237,7 @@ def prepare_buffer_dataset(x_buffer, y_buffer, correctness_buffer, segment_len=5
 # ==============================================================================
 def create_colorblind_ce_colormap():
     """
-    建立色盲友善 (Colorblind-Safe) 且結合 Cross-Entropy 損失深淺的色彩映射：
+    結合 Cross-Entropy 損失深淺的色彩映射：
     - 正向 (Correct, 預測正確)：寶石藍系 (Deep Sapphire Blue -> Soft Ice Blue)
       Cross-Entropy 越低 (預測信心度越強、Loss 越小)，顏色越深藍。
     - 負向 (Incorrect, 預測錯誤)：朱紅/琥珀橘系 (Deep Vermilion/Rust -> Soft Peach)
@@ -267,20 +267,33 @@ def create_colorblind_ce_colormap():
 
 def evaluate_trial_prediction(model, windows_tensor, true_label, device):
     """
-    評估單一 Trial 在給定模型下的預測輸出、多數決類別、Cross-Entropy 損失與真實類別機率
+    評估單一 Trial：
+    - 使用 sliding windows 進行預測
+    - 以多數決決定最終類別
+    - 若票數相同，直接判定為失敗
+    - 計算 Cross-Entropy Loss 與真實類別機率
     """
     model.eval()
+
     with torch.no_grad():
         w_tensor = windows_tensor.to(device)
         outputs = model(w_tensor)  # (K, n_classes)
-        probs = F.softmax(outputs, dim=1)  # (K, n_classes)
-        mean_prob = probs.mean(dim=0).cpu().numpy()  # (n_classes,)
+        probs = F.softmax(outputs, dim=1)
+        mean_prob = probs.mean(dim=0).cpu().numpy()
         preds = outputs.argmax(dim=1).cpu().numpy()
 
-    final_pred = int(mode(preds, keepdims=False)[0])
-    is_correct = bool(final_pred == true_label)
+    # 計算各類別的投票數
+    vote_counts = np.bincount(preds, minlength=2)
 
-    # 計算對 True Label 的 Cross-Entropy Loss
+    # 若最高票數相同，視為平手
+    if vote_counts[0] == vote_counts[1]:
+        final_pred = -1
+        is_correct = False
+    else:
+        final_pred = int(np.argmax(vote_counts))
+        is_correct = bool(final_pred == true_label)
+
+    # 對 True Label 計算 Cross-Entropy Loss
     p_true = float(np.clip(mean_prob[true_label], 1e-7, 1.0 - 1e-7))
     ce_loss = float(-np.log(p_true))
     score = p_true
