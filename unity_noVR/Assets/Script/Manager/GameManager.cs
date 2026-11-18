@@ -79,7 +79,7 @@ public class GameManager : MonoBehaviour
     {
         Application.runInBackground = true;
         // Send_LSL_Marker.instance.lsl_send_string_to_python(Config.Stage[(int)now_stage]);
-        TCP_Client.instance.send_string_to_python(Config.Stage[(int)now_stage]);
+        if ((int)now_stage < Config.Stage.Length) TCP_Client.instance.send_string_to_python(Config.Stage[(int)now_stage]);
 
         if (StopOptionCanvas != null) StopOptionCanvas.SetActive(false);
 

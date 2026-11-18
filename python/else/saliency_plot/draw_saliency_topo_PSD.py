@@ -189,7 +189,7 @@ def main():
     # ===================
 
     montage = mne.channels.make_standard_montage('standard_1020')
-    base_dir = r"/mnt/project/MIEXP/DATA_Cygnus"
+    base_dir = r"/mnt/home/2025/adenchong/VR_BCI/python/Aden/CV_output"
     ids = ["35", "37", "38", "40", "41", "42", "43", "44", "45", "47", "48", "50", "51", "52", "54", "55", "57", "58", "63", "64", "65", "68", "69", "70"]
     sessions = ["s1", "s2"]
     runs = [f"run{i}" for i in range(1, 8)]

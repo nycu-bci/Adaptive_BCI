@@ -27,6 +27,8 @@ for p in [current_dir, parent_dir, os.path.join(parent_dir, "utils")]:
 from scipy.signal import hilbert
 from scipy.stats import sem
 
+from common_utils import CHANNEL_CONFIGS
+
 # ==========================================
 # Experimental Flags (Boolean)
 # ==========================================
@@ -238,9 +240,8 @@ def plot_4_panel_comparison(x_cls1, x_cls2, fs, ch_names, target_ch, subject, se
 def run_tfa_analysis(base_dir=r"/mnt/project/MIEXP/DATA_Cygnus", output_dir="TFA",
                      channels="22", ids=None, sessions=None,
                      do_ica=False, do_car=True, log_file="TFA2.txt"):
-    fs = 500  
-    ch_names = ['Fp1', 'Fp2', 'AF3', 'AF4', 'F3', 'Fz', 'F4', 'FC3', 'FCz', 'FC4', 'C3', 'Cz',
-                'C4', 'CP3', 'CPz', 'CP4', 'P3', 'Pz', 'P4', 'O1', 'Oz', 'O2']
+    fs = 500
+    ch_names = CHANNEL_CONFIGS[str(channels)]["ch_names"]
 
     os.makedirs(output_dir, exist_ok=True)
     
@@ -304,7 +305,13 @@ def run_tfa_analysis(base_dir=r"/mnt/project/MIEXP/DATA_Cygnus", output_dir="TFA
             if x_mi is None:
                 print(f"⚠️ No sufficient data found, skipping.")
                 continue
-            
+
+            if x_mi.shape[1] != len(ch_names):
+                raise ValueError(
+                    f"Channel mismatch: data has {x_mi.shape[1]} channels but --channels {channels} "
+                    f"expects {len(ch_names)} ({ch_names})."
+                )
+
             print("Applying 1-40 Hz Bandpass Filter...")
             x_mi_filtered = mne.filter.filter_data(x_mi, sfreq=fs, l_freq=1.0, h_freq=40.0, n_jobs=-1, verbose=False)
 

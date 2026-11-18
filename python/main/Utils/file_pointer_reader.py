@@ -7,6 +7,7 @@ Author: Antigravity
 Date: 2026-02-26
 """
 import numpy as np
+import os
 import re
 import datetime
 import time
@@ -31,6 +32,10 @@ def readCsvFromPointer(path, channelIndex, linePointer=0):
     headerLines = 11  # CSV header 固定 11 行
 
     print(f"{config.TAGS.INFO.value} [DEBUG] readCsvFromPointer: path={path}, linePointer={linePointer}")
+
+    if not os.path.exists(path):  # CSV 在第一筆 sample 到達後才建立；整段都沒資料時檔案不存在
+        print(f"{config.TAGS.INFO.value} [DEBUG] readCsvFromPointer: 檔案尚未建立 (沒有收到任何 sample)")
+        return np.array([]), np.array([]).reshape(0, len(channelIndex)), linePointer
 
     with open(path, 'r', encoding='utf-8', errors='ignore') as f:
         # 跳過 header
@@ -75,7 +80,7 @@ def readLogFromPointer(path, linePointer=0):
     """
     trials = {}
     patTrial = re.compile(
-        r'Trial\s+(\d+)\s+(START|CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?',
+        r'Trial\s+(\d+)\s+(START|CUT|WRONG_CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?',
         re.IGNORECASE
     )
     patEyes = re.compile(
@@ -83,6 +88,7 @@ def readLogFromPointer(path, linePointer=0):
         re.IGNORECASE
     )
     newLineCount = 0
+    startOffsets = {}  # trial idx -> 本次讀取內 START 那一行的位移
 
     print(f"{config.TAGS.INFO.value} [DEBUG] readLogFromPointer: path={path}, linePointer={linePointer}")
 
@@ -108,10 +114,17 @@ def readLogFromPointer(path, linePointer=0):
                     trialEntry.setdefault('cut', []).append(ts)
                 else:
                     trialEntry[typ] = ts
+                if typ == 'start':
+                    startOffsets[idx] = newLineCount - 1
                 if label is not None:
                     trialEntry['label'] = label
 
     newLinePointer = linePointer + newLineCount
+    # 最後一個有 START 的 trial 還沒 END (進行中)：pointer 停在它的 START，下次才讀得到完整 trial
+    if startOffsets:
+        lastIdx = max(startOffsets, key=startOffsets.get)
+        if 'end' not in trials[lastIdx]:
+            newLinePointer = linePointer + startOffsets[lastIdx]
 
     print(f"{config.TAGS.INFO.value} [DEBUG] readLogFromPointer: 讀取 {newLineCount} 行新資料, "
           f"解析 {len(trials)} 個 trials, newLinePointer={newLinePointer}")

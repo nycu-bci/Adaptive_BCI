@@ -164,6 +164,15 @@ def compute_and_save_saliency(model, dataset, ch_names, save_dir, device, batch_
     print(f"✅ Saliency 儲存完成！({xb_pkl})")
 
 
+def resolve_mi_path(run_dir, mi_filename, ch_str):
+    """依序找 mi_filename、mi_<ch>.pt、mi.pt (舊資料 13 通道存成 mi.pt)；都沒有就回傳 mi_filename 的路徑。"""
+    for name in dict.fromkeys([mi_filename, f"mi_{ch_str}.pt", "mi.pt"]):
+        path = os.path.join(run_dir, name)
+        if os.path.exists(path):
+            return path
+    return os.path.join(run_dir, mi_filename)
+
+
 def train_cross_validation(channels="22", mode="per_run", base_dir=r"/mnt/project/MIEXP/DATA_Cygnus",
                            save_dir=None, ids=None, sessions=None, batch_size=8, lr=1e-3, epochs=100,
                            k_folds=4, strides=100, seed=42, log_file=None):
@@ -216,7 +225,8 @@ def train_cross_validation(channels="22", mode="per_run", base_dir=r"/mnt/projec
             for s in sessions:
                 print(f"\n===================== subject {i}, session {s} start ================================")
                 subject_session_dir = os.path.join(base_dir, i, s)
-                datas = [os.path.join(subject_session_dir, f"run{r}", mi_filename) for r in range(1, 8)]
+                datas = [resolve_mi_path(os.path.join(subject_session_dir, f"run{r}"), mi_filename, ch_str)
+                         for r in range(1, 8)]
 
                 # 若指定自訂 save_dir，鏡像其路徑
                 if save_dir:

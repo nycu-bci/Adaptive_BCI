@@ -25,7 +25,8 @@
     "is_simulated_eeg": false,
     "is_simulated_unity": false,
     "save_csv": true,
-    "replay_buffer_limit": 320
+    "prediction_log_offset_s": 0.70,
+    "replay_buffer_limit": 384
   },
   "model_settings": {
     "default_model": "SCCNet",
@@ -36,12 +37,22 @@
     "trial_train_interval": 4,
     "group_note_num": 5,
     "cube_space_time": 0.7,
-    "adaptive_model": false
+    "adaptive_model": false,
+    "success_cut_count": 1
   },
   "online_adaptation": {
     "batch_size": 8,
-    "learning_rate": 0.001,
+    "learning_rate": 0.002,
     "epochs": 4,
-    "use_val": true
+    "use_val": true,
+    "switch_streak": 2,
+    "finetune_acc_threshold": 0.75,
+    "vote_offset_s": 4.25,
+    "swap_guard_s": 1.5,
+    "finetune_gate": "sprt",
+    "sprt_p0": 0.65,
+    "sprt_p1": 0.85,
+    "sprt_alpha": 0.05,
+    "sprt_beta": 0.2
   }
 }

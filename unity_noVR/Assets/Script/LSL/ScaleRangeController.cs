@@ -14,8 +14,8 @@ public class ScaleRangeController : MonoBehaviour
 
     public float updateInterval = 0.1f; // LSL or input interval
     // Adjust speeds
-    public float speedUp = 0.2f;   // Faster upward ¤W¤É³t«× // ¨C¬í¤W¤É 0.2¡A¤W¤É³t«×¬°¤U­°¨â­¿
-    public float speedDown = 0.1f; // Slower downward ¦ÛµM¤U­°³t«×
+    public float speedUp = 0.2f;   // Faster upward ä¸Šå‡é€Ÿåº¦ // æ¯ç§’ä¸Šå‡ 0.2ï¼Œä¸Šå‡é€Ÿåº¦ç‚ºä¸‹é™å…©å€
+    public float speedDown = 0.1f; // Slower downward è‡ªç„¶ä¸‹é™é€Ÿåº¦
     private float timer = 0f;
     private float scale_radio = 2f;
     private TCP_Client tcp_predict;
@@ -43,8 +43,8 @@ public class ScaleRangeController : MonoBehaviour
             foreach (int val in tcp_predict.valueHistory)
                 if (val == 1) ones++;
 
-            RightTargetScale =  (maxHistory - ones) / (maxHistory * scale_radio); // 0 ¶V¦h´N§â¥k¤â«G°_¨Ó
-            LeftTargetScale = ones / (maxHistory * scale_radio); // 1 ¶V¦h´N§â¥ª¤â¶q°_¨Ó
+            RightTargetScale =  (maxHistory - ones) / (maxHistory * scale_radio); // 0 è¶Šå¤šå°±æŠŠå³æ‰‹äº®èµ·ä¾†
+            LeftTargetScale = ones / (maxHistory * scale_radio); // 1 è¶Šå¤šå°±æŠŠå·¦æ‰‹é‡èµ·ä¾†
         }
         // right stick
         if (RightCurrentScale < RightTargetScale)
@@ -58,7 +58,7 @@ public class ScaleRangeController : MonoBehaviour
 
 
         // Apply to material
-        RightSaberMaterial.SetFloat("_scale_range", RightCurrentScale);  // ¥Ø«e¬O³]©w 0.5 ´N¬Oº¡ªº
+        RightSaberMaterial.SetFloat("_scale_range", RightCurrentScale);  // ç›®å‰æ˜¯è¨­å®š 0.5 å°±æ˜¯æ»¿çš„
         // left stick
         if (LeftCurrentScale < LeftTargetScale)
         {
@@ -70,7 +70,7 @@ public class ScaleRangeController : MonoBehaviour
         }
 
         // Apply to material
-        LeftSaberMaterial.SetFloat("_scale_range", LeftCurrentScale);  // ¥Ø«e¬O³]©w 0.5 ´N¬Oº¡ªº
+        LeftSaberMaterial.SetFloat("_scale_range", LeftCurrentScale);  // ç›®å‰æ˜¯è¨­å®š 0.5 å°±æ˜¯æ»¿çš„
     }
 
 

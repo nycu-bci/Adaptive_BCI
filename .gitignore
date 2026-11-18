@@ -112,3 +112,52 @@ $RECYCLE.BIN/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# --------------------------------------------------------------
+# Local analysis data, outputs and logs (large / subject data)
+# --------------------------------------------------------------
+python/Aden/
+python/EOG/
+python/old_log/
+python/Saliency_*_Raw/
+python/Grid_Outputs_*/
+python/checkpoints/
+python/training_log_*.txt
+python/erd_topomap_log_*.txt
+python/TFA2.txt
+python/eyes_movement_detect.txt
+
+# --------------------------------------------------------------
+# Unity generated files
+# --------------------------------------------------------------
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Ll]ogs/
+UserSettings/
+*.csproj
+*.sln
+
+# --------------------------------------------------------------
+# NASA_TLX
+# --------------------------------------------------------------
+python/nasa_tlx_charts
+
+# --------------------------------------------------------------
+# Unity standalone build output
+# --------------------------------------------------------------
+/Game/
+
+# --------------------------------------------------------------
+# Visual Studio IDE cache
+# --------------------------------------------------------------
+.vs/
+
+# --------------------------------------------------------------
+# Generated analysis outputs (figures, csv, cache)
+# --------------------------------------------------------------
+python/analysis/results/
+# Exceptions: Unity materials (the *.mat rule above is for MATLAB data) and the base model A shared with collaborators
+!unity*/Assets/**/*.mat
+!python/main/EEG/checkpoint_main/cA_000.pth
+!unity*/Assets/**/env/

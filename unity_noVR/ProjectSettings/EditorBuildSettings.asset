@@ -8,9 +8,15 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Lobby.unity
     guid: 188696d842e62064a9647280981c417e
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/MI.unity
     guid: 27920f03f2cff7440aeddb20b9e2a8a4
+  - enabled: 0
+    path: Assets/Scenes/MI_Cross.unity
+    guid: de6b8fa4721d5db4f950da6b67ba6f48
+  - enabled: 1
+    path: Assets/Scenes/MI_v2.unity
+    guid: 7ceda40e2cf7efd4f9e0af8983325eff
   m_configObjects:
     Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 0f806240f492ba54c813bae5b046e9a2,
       type: 2}

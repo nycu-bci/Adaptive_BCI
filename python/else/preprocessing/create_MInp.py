@@ -1,6 +1,7 @@
 """
 資料前處理：將原始 EEG CSV 與 Log 檔轉換為 MI 和 Resting 的 .pt 檔案。
 支援命令列參數自訂 base_dir、output_dir 與是否按標籤平衡重排 (arrange_by_label)。
+用法：python python/else/preprocessing/create_MInp.py --base_dir D:/data/DATA_Cygnus [--success_cut_count 5]  (舊 log 每個成功 trial 有 5 個 CUT 時用 5)
 """
 
 import os
@@ -21,13 +22,16 @@ for p in [current_dir, project_root, os.path.join(project_root, "utils")]:
 
 from common_utils import arrange_by_label, CHANNEL_CONFIGS
 
+DEFAULT_SUCCESS_CUT_COUNT = 1  # 與 python/config.json game_settings.success_cut_count 相同；舊資料 (每個 trial 5 個 CUT) 用 --success_cut_count 5
+
 
 class EEGDataLoader:
-    def __init__(self, file_paths, log_paths, channel_index, fs=500):
+    def __init__(self, file_paths, log_paths, channel_index, fs=500, success_cut_count=DEFAULT_SUCCESS_CUT_COUNT):
         self.file_paths = file_paths
         self.log_paths = log_paths
         self.channel_index = channel_index
         self.fs = fs
+        self.success_cut_count = success_cut_count
 
         self.segments = []
         self.labels = []
@@ -58,7 +62,7 @@ class EEGDataLoader:
 
     def _parse_log_file(self, path):
         trials = {}
-        pat = re.compile(r'Trial\s+(\d+)\s+(START|CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?', re.IGNORECASE)
+        pat = re.compile(r'Trial\s+(\d+)\s+(START|CUT|WRONG_CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?', re.IGNORECASE)
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 m = pat.match(line.strip())
@@ -94,7 +98,7 @@ class EEGDataLoader:
             t = trials[idx]
             if 'start' in t and 'end' in t and 'label' in t:
                 cut_list = t.get('cut', [])
-                is_fail = (len(cut_list) < 5)
+                is_fail = ('wrong_cut' in t) or len(cut_list) < self.success_cut_count
                 start_rel = t['start'] - self.rec_epoch
                 end_rel = t['end'] - self.rec_epoch
                 i0 = np.searchsorted(timestamps, start_rel, side='left')
@@ -196,10 +200,11 @@ class EEGDataLoader:
 
 
 class EEGSelfDataLoader:
-    def __init__(self, file_paths, log_paths, channel_index):
+    def __init__(self, file_paths, log_paths, channel_index, success_cut_count=DEFAULT_SUCCESS_CUT_COUNT):
         self.file_paths = file_paths
         self.log_paths = log_paths
         self.channel_index = channel_index
+        self.success_cut_count = success_cut_count
         self.x_data = None
         self.y_data = None
         self.x_data_resting = None
@@ -210,7 +215,8 @@ class EEGSelfDataLoader:
         loader = EEGDataLoader(
             file_paths=self.file_paths,
             log_paths=self.log_paths,
-            channel_index=self.channel_index
+            channel_index=self.channel_index,
+            success_cut_count=self.success_cut_count
         )
         loader.load_and_preprocess_data()
         self.x_data, self.y_data, self.failures_data = loader.get_eeg_trial_channel_sample_np()
@@ -242,7 +248,7 @@ class EEGSelfDataLoader:
 
 def process_data_dir(base_dir=r"/mnt/project/MIEXP/DATA_Cygnus", output_dir=None,
                      channels="22", mi_name=None, rest_name="rest.pt",
-                     do_arrange_by_label=True, overwrite=False):
+                     do_arrange_by_label=True, overwrite=False, success_cut_count=DEFAULT_SUCCESS_CUT_COUNT):
     """
     遍歷 base_dir 尋找成對的 eeg_record*.csv 與 log*.txt，並轉換儲存為 .pt 檔。
     
@@ -253,6 +259,7 @@ def process_data_dir(base_dir=r"/mnt/project/MIEXP/DATA_Cygnus", output_dir=None
     :param rest_name: 輸出 Resting 檔名 (預設 rest.pt)
     :param do_arrange_by_label: 是否按照標籤排列平衡 (預設 True)
     :param overwrite: 是否覆蓋已存在的 .pt 檔案 (預設 False)
+    :param success_cut_count: trial 成功所需的 CUT 數 (新 log 為 1，舊 log 為 5)
     """
     if str(channels) in CHANNEL_CONFIGS:
         channel_index = CHANNEL_CONFIGS[str(channels)]["raw_channel_index"]
@@ -317,7 +324,8 @@ def process_data_dir(base_dir=r"/mnt/project/MIEXP/DATA_Cygnus", output_dir=None
                 data = EEGSelfDataLoader(
                     file_paths=[full_csv_path],
                     log_paths=[full_log_path],
-                    channel_index=channel_index
+                    channel_index=channel_index,
+                    success_cut_count=success_cut_count
                 )
                 data.save_as_pt(save_name_mi, do_arrange_by_label=do_arrange_by_label)
                 data.save_resting_as_pt(save_name_rest)
@@ -347,6 +355,8 @@ def main():
                         help="關閉依照標籤排序")
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="若目標檔案已存在是否覆蓋")
+    parser.add_argument("--success_cut_count", type=int, default=DEFAULT_SUCCESS_CUT_COUNT,
+                        help="trial 成功所需的 CUT 數；舊 log (成功的 trial 有 5 個 CUT) 請用 5 (預設: 1)")
 
     args = parser.parse_args()
 
@@ -357,7 +367,8 @@ def main():
         mi_name=args.mi_name,
         rest_name=args.rest_name,
         do_arrange_by_label=args.arrange_by_label,
-        overwrite=args.overwrite
+        overwrite=args.overwrite,
+        success_cut_count=args.success_cut_count
     )
 
 

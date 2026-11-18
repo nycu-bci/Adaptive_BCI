@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 using UnityEngine.UIElements;
 
 public class BeatmapSpawner : MonoBehaviour
-{   // ­n§â run ªº°V½m¥Î¦^¨Ó¡A»İ­n§ï TimeLogger.cs ¸Ì­±¶Ç°e¨ì python ¨ºÃä¡A¥H¤Î ECEOCondition
+{   // è¦æŠŠ run çš„è¨“ç·´ç”¨å›ä¾†ï¼Œéœ€è¦æ”¹ TimeLogger.cs è£¡é¢å‚³é€åˆ° python é‚£é‚Šï¼Œä»¥åŠ ECEOCondition
     public GameObject blockPrefab_red;
     public GameObject blockPrefab_blue;
     public GameObject LinePrefab_red;
@@ -19,24 +19,24 @@ public class BeatmapSpawner : MonoBehaviour
 
     protected GameManager GM;
     protected float songStartTime;
-    protected float songDelayTime = 0f; // ´î¥h¼È°±®É¶¡
+    protected float songDelayTime = 0f; // æ¸›å»æš«åœæ™‚é–“
     protected bool is_pause = false;
     // protected List<ColorNote> notes = new List<ColorNote>();
     protected List<OldNote> old_notes = new List<OldNote>();
-    protected HashSet<OldNote> finalNote = new HashSet<OldNote>(); // ¥Î¨Ó°O¿ı¨C¤@²Õ³Ì«á¤@­Ó Note (¥Î©ó¸£ªi±±¨î)
-    protected Dictionary<OldNote, float> noteGroupDurationMap = new Dictionary<OldNote, float>();  // ¥Î¨Ó°O¿ı¨C­Ó Note ©ÒÄİ Group ªº®É¶¡®t (LastTime - FirstTime)
+    protected HashSet<OldNote> finalNote = new HashSet<OldNote>(); // ç”¨ä¾†è¨˜éŒ„æ¯ä¸€çµ„æœ€å¾Œä¸€å€‹ Note (ç”¨æ–¼è…¦æ³¢æ§åˆ¶)
+    protected Dictionary<OldNote, float> noteGroupDurationMap = new Dictionary<OldNote, float>();  // ç”¨ä¾†è¨˜éŒ„æ¯å€‹ Note æ‰€å±¬ Group çš„æ™‚é–“å·® (LastTime - FirstTime)
 
     protected int currentNoteIndex = 0;
     protected BeatSaberInfoLoader beatSaberInfoLoader;  // require other script
-    protected float per_spawn_second = 2.5f;  // ·|¨Æ¥ı²£¥Í cube¡AµM«á¨ì©wÂI®É¶¡¥X²{¦b«ü©w¦ì¸m
+    protected float per_spawn_second = 2.5f;  // æœƒäº‹å…ˆç”¢ç”Ÿ cubeï¼Œç„¶å¾Œåˆ°å®šé»æ™‚é–“å‡ºç¾åœ¨æŒ‡å®šä½ç½®
     protected float start_game_seconds = 0f;
-    protected bool is_sent_line = true;  // ³]©w¤@­Ó group¡A·|¥X²{¤@­Ó line
+    protected bool is_sent_line = true;  // è¨­å®šä¸€å€‹ groupï¼Œæœƒå‡ºç¾ä¸€å€‹ line
     protected Song song;
     protected float beatsPerSecond;
-    protected float beatThreshold_up; // ³Ğ«Ø group ªº³Ì±`®e³\¬í¼Æ
-    protected float beatThreshold_down;  // ³Ğ«Ø group ªº³Ì§C®e³\¬í¼Æ
-    protected float beatThreshold_1s;  // 1 ¬í
-    protected TCP_Client TC;  // ¥Î©ó¶Ç°e¸C²´³¬²´
+    protected float beatThreshold_up; // å‰µå»º group çš„æœ€å¸¸å®¹è¨±ç§’æ•¸
+    protected float beatThreshold_down;  // å‰µå»º group çš„æœ€ä½å®¹è¨±ç§’æ•¸
+    protected float beatThreshold_1s;  // 1 ç§’
+    protected TCP_Client TC;  // ç”¨æ–¼å‚³é€çœçœ¼é–‰çœ¼
 
     void Start()
     {
@@ -76,8 +76,8 @@ public class BeatmapSpawner : MonoBehaviour
                     if (!beatSaberInfoLoader.is_end_song)
                     {
                         StartCoroutine(GM.SetFinalAcc());
-                        // StartCoroutine(ECEOCondition(Config.adaptive_model)); // ¸C²´³¬²´¥ô°È¡A»P¬O§_°V½m
-                        // StartCoroutine(ECEOCondition(false)); // ¸C²´³¬²´¥ô°È¡A»P¬O§_°V½m 
+                        // StartCoroutine(ECEOCondition(Config.adaptive_model)); // çœçœ¼é–‰çœ¼ä»»å‹™ï¼Œèˆ‡æ˜¯å¦è¨“ç·´
+                        // StartCoroutine(ECEOCondition(false)); // çœçœ¼é–‰çœ¼ä»»å‹™ï¼Œèˆ‡æ˜¯å¦è¨“ç·´ 
                     }
                     beatSaberInfoLoader.is_end_song = true;
                     return;
@@ -91,7 +91,7 @@ public class BeatmapSpawner : MonoBehaviour
                         int x = old_notes[currentNoteIndex].lineIndex, y = old_notes[currentNoteIndex].lineLayer, d = old_notes[currentNoteIndex].cutDirection;
                         if (GM.onAutoSaberCallback != null)
                         {
-                            if (finalNote.Contains(old_notes[currentNoteIndex]) || Config.group_note_num <= 1) // group ¤p©óµ¥©ó 1¡A´Nª½±µ¥ş³¡¸£ªi±±¨î
+                            if (finalNote.Contains(old_notes[currentNoteIndex]) || Config.group_note_num <= 1) // group å°æ–¼ç­‰æ–¼ 1ï¼Œå°±ç›´æ¥å…¨éƒ¨è…¦æ³¢æ§åˆ¶
                             {
                                 StartCoroutine(GM.onAutoSaberCallback.Invoke(x, y, d, true));
                                 Debug.Log("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ use brain to controll saber!!!");
@@ -118,13 +118,13 @@ public class BeatmapSpawner : MonoBehaviour
             }
         }
     }
-    protected IEnumerator ECEOCondition(bool is_training) // ¸C²´³¬²´¥ô°È
+    protected IEnumerator ECEOCondition(bool is_training) // çœçœ¼é–‰çœ¼ä»»å‹™
     {
         yield return new WaitForSeconds(10f);
         text2speech.instance.Speak("Please Close your eyes.");
         TC.send_string_to_python($"Close eyes: {Timer.GetUnixTimestamp():F3}");
         // yield return new WaitForSeconds(2.5f);
-        if (is_training) GM.start_training(); // ®Ú¾Ú³]©w§PÂ_¬O§_­n°V½m
+        if (is_training) GM.start_training(); // æ ¹æ“šè¨­å®šåˆ¤æ–·æ˜¯å¦è¦è¨“ç·´
         yield return new WaitForSeconds(20f);
         
         text2speech.instance.Speak("Please Open your eyes.");
@@ -152,7 +152,7 @@ public class BeatmapSpawner : MonoBehaviour
                 }
                 if (use_random) beatmap = set_random_old_note(beatmap, Config.group_note_num, beatThreshold_up, beatThreshold_down, beatThreshold_1s);
                 old_notes = beatmap.notes;
-                GM.correct_total = old_notes.Count * 1;  // tmp // §â group µ²ªGµ¹¨ì GM
+                GM.correct_total = old_notes.Count * 1;  // tmp // æŠŠ group çµæœçµ¦åˆ° GM
             }
         }));
     }
@@ -180,9 +180,9 @@ public class BeatmapSpawner : MonoBehaviour
         // StartCoroutine(AnimateNote(obj));
         // Optional: Rotate or animate based on direction
         obj.name = $"Note [t={note.time:F2}, dir={note.cutDirection}]";
-        if(Config.group_note_num == 1) obj.AddComponent<NoteLogTrigger>();  // ¥u¦³¤@­Ó note ´N­n¥[¤J³o­Ó¤~·|¦³ start ©M end
+        if(Config.group_note_num == 1) obj.AddComponent<NoteLogTrigger>();  // åªæœ‰ä¸€å€‹ note å°±è¦åŠ å…¥é€™å€‹æ‰æœƒæœ‰ start å’Œ end
     }
-    protected void SpawnLine(OldNote note, float beatThreshold_up, float assign_dur=-1) // ¥Í¦¨½u±ø¡A¥Î©ó group start end¡A¤§«á¤]¥i¥H³æ¬İ cut¡AµM«á¥Ñ cut ©¹«e©Î¬O«á±À¡ASaberSlicer ¬å¤U¥h·|°e¥X CUT
+    protected void SpawnLine(OldNote note, float beatThreshold_up, float assign_dur=-1) // ç”Ÿæˆç·šæ¢ï¼Œç”¨æ–¼ group start endï¼Œä¹‹å¾Œä¹Ÿå¯ä»¥å–®çœ‹ cutï¼Œç„¶å¾Œç”± cut å¾€å‰æˆ–æ˜¯å¾Œæ¨ï¼ŒSaberSlicer ç ä¸‹å»æœƒé€å‡º CUT
     {
         Vector3 position = new Vector3(note.lineIndex - 1.5f, note.lineLayer - 0.3f + spawn_y_offset, -1.5f) * cude_space; // Adjust as needed
         Quaternion rotation = Quaternion.identity;
@@ -190,34 +190,34 @@ public class BeatmapSpawner : MonoBehaviour
         if (note.type == 1) lineObj = Instantiate(LinePrefab_blue, position + transform.position, rotation);
         else lineObj = Instantiate(LinePrefab_red, position + transform.position, rotation);
 
-        // 2. ±q¦r¨å¨ú±o³o²Õªº®É¶¡®t (note_last_time - note_first_time)
+        // 2. å¾å­—å…¸å–å¾—é€™çµ„çš„æ™‚é–“å·® (note_last_time - note_first_time)
         float groupDuration = 0f;
         if (noteGroupDurationMap.TryGetValue(note, out float duration))
         {
             groupDuration = duration;
         }
-        if (assign_dur != -1)  // ³o¬q¬O¬°¤F¦b calibration ¦Û°O³Ğ«Ø note ªº®É­Ô¡A·|¨S¦³ duration¡A©Ò¥H»İ­n¦Û¤v³]©w
+        if (assign_dur != -1)  // é€™æ®µæ˜¯ç‚ºäº†åœ¨ calibration è‡ªè¨˜å‰µå»º note çš„æ™‚å€™ï¼Œæœƒæ²’æœ‰ durationï¼Œæ‰€ä»¥éœ€è¦è‡ªå·±è¨­å®š
         {
             groupDuration = assign_dur; 
         }
-        // 3. ­pºâ¤ñ¨Ò¨Ã­×§ï Scale X
-        if (beatThreshold_up > 0) // ¨¾§bÁ×§K°£¥H 0
+        // 3. è¨ˆç®—æ¯”ä¾‹ä¸¦ä¿®æ”¹ Scale X
+        if (beatThreshold_up > 0) // é˜²å‘†é¿å…é™¤ä»¥ 0
         {
             float scaleRatio = groupDuration / beatThreshold_up;
 
-            // ¨ú±o­ì¥»ªº Scale
+            // å–å¾—åŸæœ¬çš„ Scale
             Vector3 newScale = lineObj.transform.localScale;
 
-            // ±N X ¶b­¼¥H¤ñ¨Ò
+            // å°‡ X è»¸ä¹˜ä»¥æ¯”ä¾‹
             newScale.z *= scaleRatio;
 
-            // À³¥Î·sªº Scale
+            // æ‡‰ç”¨æ–°çš„ Scale
             lineObj.transform.localScale = newScale;
 
             // Debug.Log($"SpawnLine: Duration={groupDuration}, Max={beatThreshold_up}, Ratio={scaleRatio}, NewScaleX={newScale.x}");
         }
     }
-    IEnumerator AnimateNote(GameObject note)  // ½Ä¥X¥h°Êµe¡A­n©µ¿ğ¥i¥H§â Vector3.forward ­¼¤pªº­È (½Õ¾ã±q«á­±¦h¤Ö½Ä¨ì spawn object)¡AµM«á duration ¤W¤É
+    IEnumerator AnimateNote(GameObject note)  // è¡å‡ºå»å‹•ç•«ï¼Œè¦å»¶é²å¯ä»¥æŠŠ Vector3.forward ä¹˜å°çš„å€¼ (èª¿æ•´å¾å¾Œé¢å¤šå°‘è¡åˆ° spawn object)ï¼Œç„¶å¾Œ duration ä¸Šå‡
     {
         float duration = 1.5f;  // 0.5f
         Vector3 start = note.transform.position + Vector3.forward * 300f;  // 100 f
@@ -232,23 +232,23 @@ public class BeatmapSpawner : MonoBehaviour
         }
     }
     
-    List<int> GenerateRandomBinaryList(int N, int numZeros, int seed) // ±q EEGtrain copy ¹L¨Óªº (¤§«e¶Ç²Îªº MI)
+    List<int> GenerateRandomBinaryList(int N, int numZeros, int seed) // å¾ EEGtrain copy éä¾†çš„ (ä¹‹å‰å‚³çµ±çš„ MI)
     {
         if (numZeros < 0 || numZeros > N)
         {
-            Debug.LogError("numZeros ¥²¶·¤¶©ó 0 ¨ì N ¤§¶¡");
+            Debug.LogError("numZeros å¿…é ˆä»‹æ–¼ 0 åˆ° N ä¹‹é–“");
             return null;
         }
 
         int numOnes = N - numZeros;
 
-        // ªì©l¤Æ List
+        // åˆå§‹åŒ– List
         List<int> binaryList = new List<int>();
 
         for (int i = 0; i < numZeros; i++) binaryList.Add(0);
         for (int i = 0; i < numOnes; i++) binaryList.Add(1);
 
-        // ¨Ï¥Î seed ªì©l¤Æ¶Ã¼Æ²£¥Í¾¹
+        // ä½¿ç”¨ seed åˆå§‹åŒ–äº‚æ•¸ç”¢ç”Ÿå™¨
         System.Random rng = new System.Random(seed);
 
         // Fisher-Yates Shuffle
@@ -264,42 +264,42 @@ public class BeatmapSpawner : MonoBehaviour
     }
     List<int> GenerateGroupedBinaryList(int N, int groupSize, int seed)
     {
-        // ÀË¬d N ¬O§_¯à³Q groupSize ¾ã°£
+        // æª¢æŸ¥ N æ˜¯å¦èƒ½è¢« groupSize æ•´é™¤
         if (N % groupSize != 0)
         {
-            Debug.LogError($"N ({N}) ¥²¶·¯à³Q groupSize ({groupSize}) ¾ã°£¡C");
+            Debug.LogError($"N ({N}) å¿…é ˆèƒ½è¢« groupSize ({groupSize}) æ•´é™¤ã€‚");
             return null;
         }
 
-        // ÀË¬d groupSize ¬O§_¬°°¸¼Æ (¬°¤FÅı 0 ©M 1 ¼Æ¶q¬Ûµ¥)
+        // æª¢æŸ¥ groupSize æ˜¯å¦ç‚ºå¶æ•¸ (ç‚ºäº†è®“ 0 å’Œ 1 æ•¸é‡ç›¸ç­‰)
         if (groupSize % 2 != 0)
         {
-            Debug.LogError($"groupSize ({groupSize}) ¥²¶·¬O°¸¼Æ¡A¤~¯à¥­§¡¤À°t 0 ©M 1¡C");
+            Debug.LogError($"groupSize ({groupSize}) å¿…é ˆæ˜¯å¶æ•¸ï¼Œæ‰èƒ½å¹³å‡åˆ†é… 0 å’Œ 1ã€‚");
             return null;
         }
 
-        // ªì©l¤Æ³Ì²×ªº List
+        // åˆå§‹åŒ–æœ€çµ‚çš„ List
         List<int> finalBinaryList = new List<int>();
 
-        // ¨Ï¥Î seed ªì©l¤Æ¶Ã¼Æ²£¥Í¾¹ (¥u»İªì©l¤Æ¤@¦¸¡A½T«O¾ã­Ó§Ç¦C¨ü±±)
+        // ä½¿ç”¨ seed åˆå§‹åŒ–äº‚æ•¸ç”¢ç”Ÿå™¨ (åªéœ€åˆå§‹åŒ–ä¸€æ¬¡ï¼Œç¢ºä¿æ•´å€‹åºåˆ—å—æ§)
         System.Random rng = new System.Random(seed);
 
-        // ­pºâÁ`¦@¦³´X²Õ
+        // è¨ˆç®—ç¸½å…±æœ‰å¹¾çµ„
         int numGroups = N / groupSize;
         int halfGroup = groupSize / 2;
 
-        // ¶}©l¤À²Õ²£¥Í
+        // é–‹å§‹åˆ†çµ„ç”¢ç”Ÿ
         for (int g = 0; g < numGroups; g++)
         {
-            // 1. «Ø¥ß¸Ó²Õªº¼È¦s List
+            // 1. å»ºç«‹è©²çµ„çš„æš«å­˜ List
             List<int> groupList = new List<int>();
 
-            // ¥[¤J¤@¥bªº 0
+            // åŠ å…¥ä¸€åŠçš„ 0
             for (int i = 0; i < halfGroup; i++) groupList.Add(0);
-            // ¥[¤J¤@¥bªº 1
+            // åŠ å…¥ä¸€åŠçš„ 1
             for (int i = 0; i < halfGroup; i++) groupList.Add(1);
 
-            // 2. ¹ï¸Ó²Õ¶i¦æ Fisher-Yates Shuffle (²Õ¤º¬~µP)
+            // 2. å°è©²çµ„é€²è¡Œ Fisher-Yates Shuffle (çµ„å…§æ´—ç‰Œ)
             for (int i = groupList.Count - 1; i > 0; i--)
             {
                 int j = rng.Next(i + 1);
@@ -308,20 +308,20 @@ public class BeatmapSpawner : MonoBehaviour
                 groupList[j] = temp;
             }
 
-            // 3. ±N¬~µP«áªº¸Ó²Õ¥[¤J³Ì²× List
+            // 3. å°‡æ´—ç‰Œå¾Œçš„è©²çµ„åŠ å…¥æœ€çµ‚ List
             finalBinaryList.AddRange(groupList);
         }
 
         return finalBinaryList;
     }
 
-    protected OldBeatmap set_random_old_note(OldBeatmap data) // data ¬° ³æ¤@ list¡A¨S¦³¤À²Õ ¥Î©ó¤§«e Caliration ¨t¦Cªº¡A²{¦b Calibriatino ¤]¥Î ³o­Ó script
+    protected OldBeatmap set_random_old_note(OldBeatmap data) // data ç‚º å–®ä¸€ listï¼Œæ²’æœ‰åˆ†çµ„ ç”¨æ–¼ä¹‹å‰ Caliration ç³»åˆ—çš„ï¼Œç¾åœ¨ Calibriatino ä¹Ÿç”¨ é€™å€‹ script
     {
-        seed = Random.Range(0, 10000); // ³]©wÀH¾÷ºØ¤l¡A¦b use_random ¬° true¡A³]©wÀH¾÷¥ª¥k¤~·|¥Î¨ì
+        seed = Random.Range(0, 10000); // è¨­å®šéš¨æ©Ÿç¨®å­ï¼Œåœ¨ use_random ç‚º trueï¼Œè¨­å®šéš¨æ©Ÿå·¦å³æ‰æœƒç”¨åˆ°
         int numNotes = data.notes.Count;
-        int numZeros = numNotes / 2; // ¤@¥b 0 ªº¼Æ¶q
+        int numZeros = numNotes / 2; // ä¸€åŠ 0 çš„æ•¸é‡
         List<int> binaryList = GenerateRandomBinaryList(numNotes, numZeros, seed);
-        // ®Ú¾Ú binaryList ­×§ï notes
+        // æ ¹æ“š binaryList ä¿®æ”¹ notes
         for (int i = 0; i < data.notes.Count; i++)
         {
             if (binaryList[i] == 0) // right blue
@@ -337,48 +337,48 @@ public class BeatmapSpawner : MonoBehaviour
         }
         return data;
     }
-    protected OldBeatmap set_random_old_note(OldBeatmap data, int n, float beatThreshold_up, float beatThreshold_down, float beatThreshold_1s) // data ¦³¤À²Õ
+    protected OldBeatmap set_random_old_note(OldBeatmap data, int n, float beatThreshold_up, float beatThreshold_down, float beatThreshold_1s) // data æœ‰åˆ†çµ„
     {
         finalNote.Clear();
         noteGroupDurationMap.Clear();
 
-        // 1. ®Ú¾Úªº³W«h¶i¦æ¤À²Õ
+        // 1. æ ¹æ“šçš„è¦å‰‡é€²è¡Œåˆ†çµ„
         List<List<OldNote>> groups = GroupNotesByRules(data.notes, n, beatThreshold_up, beatThreshold_down, beatThreshold_1s);
 
-        /*// 2. ¦pªG Group ¼Æ¶q¬O©_¼Æ (°ò¼Æ)¡A¥h±¼³Ì«á¤@²Õ // ³o³¡¤À¥i¥H¦Ò¼{­n¤£­n¶}
+        /*// 2. å¦‚æœ Group æ•¸é‡æ˜¯å¥‡æ•¸ (åŸºæ•¸)ï¼Œå»æ‰æœ€å¾Œä¸€çµ„ // é€™éƒ¨åˆ†å¯ä»¥è€ƒæ…®è¦ä¸è¦é–‹
         if (groups.Count % 2 != 0)
         {
-            Debug.Log($"Group num is {groups.Count} (odd)¡Aremove last group");
+            Debug.Log($"Group num is {groups.Count} (odd)ï¼Œremove last group");
             groups.RemoveAt(groups.Count - 1);
         }*/
 
-        // ¦pªG¤À²Õ«á§¹¥ş¨S¦³¸ê®Æ¡Aª½±µ¦^¶ÇªÅªº data
+        // å¦‚æœåˆ†çµ„å¾Œå®Œå…¨æ²’æœ‰è³‡æ–™ï¼Œç›´æ¥å›å‚³ç©ºçš„ data
         if (groups.Count == 0)
         {
             data.notes.Clear();
             return data;
         }
 
-        // 3. °w¹ï "Group ªº¼Æ¶q" ¥Í¦¨ÀH¾÷ 0/1 List
+        // 3. é‡å° "Group çš„æ•¸é‡" ç”Ÿæˆéš¨æ©Ÿ 0/1 List
         seed = Random.Range(0, 10000);
         int numGroups = groups.Count;
         Debug.Log($"Group num is {numGroups}");
-        int numZeros = numGroups / 2; // ¤@¥bªº Group ¬° 0
+        int numZeros = numGroups / 2; // ä¸€åŠçš„ Group ç‚º 0
         List<int> binaryList = GenerateGroupedBinaryList(numGroups, Config.trial_train_interval, seed);// GenerateRandomBinaryList(numGroups, numZeros, seed);
 
-        // 4. «Ø¥ß¤@­Ó·sªº List ¨Ó¦s©ñ³B²z«áªº Note
-        // ¦]¬°¦³¨Ç Note ¥i¯à¦b¤À²Õ¹Lµ{¤¤³Q¥á±ó (¤£¨¬ n ¥B®É¶¡µu)¡A©ÎªÌ¦]©_¼Æ²Õ³Q²¾°£
-        // ©Ò¥H§Ú­Ì¤£¯àª½±µ­×§ï­ì¦³ªº data.notes¡A¦Ó¬O­n­«²Õ¤@­Ó·sªº
+        // 4. å»ºç«‹ä¸€å€‹æ–°çš„ List ä¾†å­˜æ”¾è™•ç†å¾Œçš„ Note
+        // å› ç‚ºæœ‰äº› Note å¯èƒ½åœ¨åˆ†çµ„éç¨‹ä¸­è¢«ä¸Ÿæ£„ (ä¸è¶³ n ä¸”æ™‚é–“çŸ­)ï¼Œæˆ–è€…å› å¥‡æ•¸çµ„è¢«ç§»é™¤
+        // æ‰€ä»¥æˆ‘å€‘ä¸èƒ½ç›´æ¥ä¿®æ”¹åŸæœ‰çš„ data.notesï¼Œè€Œæ˜¯è¦é‡çµ„ä¸€å€‹æ–°çš„
         List<OldNote> finalNotes = new List<OldNote>();
 
-        // 5. ¹M¾ú¨C¤@­Ó Group¡A®Ú¾Ú binaryList ³]©wÃC¦â»P¦ì¸m
+        // 5. éæ­·æ¯ä¸€å€‹ Groupï¼Œæ ¹æ“š binaryList è¨­å®šé¡è‰²èˆ‡ä½ç½®
         for (int i = 0; i < groups.Count; i++)
         {
-            int typeForGroup = binaryList[i]; // ³o¤@¾ã²Õ­n¬O 0 ÁÙ¬O 1
+            int typeForGroup = binaryList[i]; // é€™ä¸€æ•´çµ„è¦æ˜¯ 0 é‚„æ˜¯ 1
             List<OldNote> currentGroup = groups[i];
             OldNote lastNoteInGroup = null;
 
-            // ­pºâ³o¤@²Õªº®É¶¡®t (Last - First)
+            // è¨ˆç®—é€™ä¸€çµ„çš„æ™‚é–“å·® (Last - First)
             float groupDuration = 0f;
             if (currentGroup.Count > 0)
             {
@@ -388,7 +388,7 @@ public class BeatmapSpawner : MonoBehaviour
             if (currentGroup.Count > 0)
             {
                 lastNoteInGroup = currentGroup[currentGroup.Count - 1];
-                finalNote.Add(lastNoteInGroup); // §â³Ì«á¤@­Ó note ¼Ğµù
+                finalNote.Add(lastNoteInGroup); // æŠŠæœ€å¾Œä¸€å€‹ note æ¨™è¨»
             }
             foreach (var note in currentGroup)
             {
@@ -402,22 +402,22 @@ public class BeatmapSpawner : MonoBehaviour
                     note.lineIndex = 1;
                     note.type = 0;
                 }
-                // ±N³o­Ó Note »P¥¦©ÒÄİ Group ªº®É¶¡®t¦s¤J¦r¨å¡A¥Î©ó SpawnLine ¬d¨µ group ®É¶¡®t
+                // å°‡é€™å€‹ Note èˆ‡å®ƒæ‰€å±¬ Group çš„æ™‚é–“å·®å­˜å…¥å­—å…¸ï¼Œç”¨æ–¼ SpawnLine æŸ¥å·¡ group æ™‚é–“å·®
                 if (!noteGroupDurationMap.ContainsKey(note))
                 {
                     noteGroupDurationMap.Add(note, groupDuration);
                 }
-                // ±N³]©w¦nªº note ¥[¤J³Ì²×²M³æ
+                // å°‡è¨­å®šå¥½çš„ note åŠ å…¥æœ€çµ‚æ¸…å–®
                 finalNotes.Add(note);
             }
         }
 
-        // 6. ±N¾ã²z¦nªº note ¶ë¦^ data
+        // 6. å°‡æ•´ç†å¥½çš„ note å¡å› data
         data.notes = finalNotes;
 
         return data;
     }
-    // ®Ú¾Ú­ì©l note ³Ğ«Ø group
+    // æ ¹æ“šåŸå§‹ note å‰µå»º group
     public List<List<OldNote>> GroupNotesByRules(List<OldNote> sourceNotes, int n, float beatThreshold_up, float beatThreshold_down, float beatThreshold_1s)
     {
         List<List<OldNote>> groupedNotes = new List<List<OldNote>>();
@@ -426,7 +426,7 @@ public class BeatmapSpawner : MonoBehaviour
         if (sourceNotes == null || sourceNotes.Count == 0) return groupedNotes;
         if (n <= 0) n = 1;
 
-        // --- ±ø¥ó 1: ¦pªG n = 1¡Aª½±µ¨C­Ó Note ¤@²Õ¦^¶Ç---
+        // --- æ¢ä»¶ 1: å¦‚æœ n = 1ï¼Œç›´æ¥æ¯å€‹ Note ä¸€çµ„å›å‚³---
         if (n == 1)
         {
             foreach (var note in sourceNotes)
@@ -445,7 +445,7 @@ public class BeatmapSpawner : MonoBehaviour
             OldNote firstNote = sourceNotes[currentIndex];
             currentGroup.Add(firstNote);
 
-            // --- ¹Á¸Õ´êº¡ n ­Ó¡A¦P®ÉÀË¬d 5 ¬í­­¨î ---
+            // --- å˜—è©¦æ¹Šæ»¿ n å€‹ï¼ŒåŒæ™‚æª¢æŸ¥ 5 ç§’é™åˆ¶ ---
             int lookAheadCount = 1;
             while (lookAheadCount < n && (currentIndex + lookAheadCount) < totalNotes)
             {
@@ -458,31 +458,31 @@ public class BeatmapSpawner : MonoBehaviour
                 lookAheadCount++;
             }
 
-            // --- ±ø¥ó 3: ÀË¬d¬O§_¹Lµu»İ­n¥á±ó ---
+            // --- æ¢ä»¶ 3: æª¢æŸ¥æ˜¯å¦éçŸ­éœ€è¦ä¸Ÿæ£„ ---
             bool shouldAddGroup = true;
             if (currentGroup.Count < n)
             {
                 float groupDuration = currentGroup[currentGroup.Count - 1].time - currentGroup[0].time;
-                // ¦pªG¤£¨¬ n ¥B®É¶¡®t < 3 ¬í -> ¥á±ó
+                // å¦‚æœä¸è¶³ n ä¸”æ™‚é–“å·® < 3 ç§’ -> ä¸Ÿæ£„
                 if (groupDuration < beatThreshold_down)
                 {
                     shouldAddGroup = false;
                 }
             }
 
-            // --- §ó·s¯Á¤Ş»PÀ³¥Î·s³W«h ---
+            // --- æ›´æ–°ç´¢å¼•èˆ‡æ‡‰ç”¨æ–°è¦å‰‡ ---
             if (shouldAddGroup)
             {
-                // ¥[¤J¦³®Äªº Group
+                // åŠ å…¥æœ‰æ•ˆçš„ Group
                 groupedNotes.Add(currentGroup);
 
-                // ¹w³]¡G¸õ¹L Group ¼Æ¶q + 1 (§R°£«á­±¨º¤@­Ó Note)
+                // é è¨­ï¼šè·³é Group æ•¸é‡ + 1 (åˆªé™¤å¾Œé¢é‚£ä¸€å€‹ Note)
                 int skipAmount = currentGroup.Count + 1;
 
-                // ÀË¬d¡G¤U¤@­Ó Note ¬O§_Â÷³o¤@²Õªº³Ì«á¤@­Ó Note ¤Ó»· (> 1¬í)
+                // æª¢æŸ¥ï¼šä¸‹ä¸€å€‹ Note æ˜¯å¦é›¢é€™ä¸€çµ„çš„æœ€å¾Œä¸€å€‹ Note å¤ªé  (> 1ç§’)
                 int nextNoteIndex = currentIndex + currentGroup.Count;
 
-                // ½T«O¨S¦³¶W¥X½d³ò
+                // ç¢ºä¿æ²’æœ‰è¶…å‡ºç¯„åœ
                 if (nextNoteIndex < totalNotes)
                 {
                     OldNote lastNoteInGroup = currentGroup[currentGroup.Count - 1];
@@ -490,20 +490,20 @@ public class BeatmapSpawner : MonoBehaviour
 
                     float gap = nextNoteToCheck.time - lastNoteInGroup.time;
 
-                    // ¦pªG¶¡¹j¶W¹L 1 ¬í -> §ï¬°¡u¤£§R°£¡v
-                    // ¤]´N¬O¥u¸õ¹L currentGroup.Count¡A«O¯d nextNoteToCheck µ¹¤U¤@½ü
+                    // å¦‚æœé–“éš”è¶…é 1 ç§’ -> æ”¹ç‚ºã€Œä¸åˆªé™¤ã€
+                    // ä¹Ÿå°±æ˜¯åªè·³é currentGroup.Countï¼Œä¿ç•™ nextNoteToCheck çµ¦ä¸‹ä¸€è¼ª
                     if (gap > beatThreshold_1s)
                     {
                         skipAmount = currentGroup.Count;
                     }
                 }
 
-                // °õ¦æ¯Á¤Ş§ó·s
+                // åŸ·è¡Œç´¢å¼•æ›´æ–°
                 currentIndex += skipAmount;
             }
             else
             {
-                // ¦pªG³o²Õ³Q¥á±ó¤F¡A¸õ¹L³o²Õªº Note¡A¤£»İ­nÃB¥~¦A§R°£«á­±¤@­Ó
+                // å¦‚æœé€™çµ„è¢«ä¸Ÿæ£„äº†ï¼Œè·³éé€™çµ„çš„ Noteï¼Œä¸éœ€è¦é¡å¤–å†åˆªé™¤å¾Œé¢ä¸€å€‹
                 currentIndex += currentGroup.Count;
             }
         }

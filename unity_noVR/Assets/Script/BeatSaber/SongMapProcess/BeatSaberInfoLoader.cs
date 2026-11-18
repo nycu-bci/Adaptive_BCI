@@ -19,6 +19,7 @@ public class BeatSaberInfoLoader : MonoBehaviour
     [Header("Audio Setting")]
     public AudioSource audioSource;
     public bool play_audio = true;
+    public bool loop_audio = true; // 48 trials run longer than the 5 min song, so repeat it
     public float play_delay_seconds_offs = 0f; // 不知為什麼時間無法對上，所以人工調整，這邊和 forward.cs 裡面設定最後位置和時間位移會有關連
     private float play_delay_seconds = 2.5f; // 從 GM 拿，GM.song_delay_time - play_delay_seconds_offset
     public float song_bpm = 120;
@@ -86,6 +87,7 @@ public class BeatSaberInfoLoader : MonoBehaviour
         }));*/
 
         string extension = Path.GetExtension(coverPath).ToLower();
+        audioSource.loop = loop_audio;
 
         AudioType audioType;
 

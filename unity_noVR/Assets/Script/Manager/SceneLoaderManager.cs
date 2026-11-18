@@ -33,7 +33,8 @@ public class SceneLoaderManager : MonoBehaviour
     }
     public void LoadMIStage()
     {
-        StartCoroutine(LoadScene(Config.Stage[(int)Stage.MI], 1));
+        //StartCoroutine(LoadScene(Config.Stage[(int)Stage.MI], 1));
+        StartCoroutine(LoadScene(Config.Stage[(int)Stage.MI], 1, "MI_v2"));
     }
     /*public void LoadBeatSaberStage()
     {
@@ -52,7 +53,7 @@ public class SceneLoaderManager : MonoBehaviour
     {
         Application.Quit();
     }
-    IEnumerator LoadScene(string scene, int index)
+    IEnumerator LoadScene(string scene, int index, string sceneToLoad = null)
     {
         //AudioManager.instance.Play("Click");
         if (GameManager.instance.is_training)
@@ -67,7 +68,8 @@ public class SceneLoaderManager : MonoBehaviour
             // Send_LSL_Marker.instance.lsl_send_string_to_python(scene);
             // Send_LSL_Marker.instance.CloseStream();
             TCP_Client.instance.send_string_to_python(scene);
-            SceneManager.LoadScene(scene);
+            SceneManager.LoadScene(sceneToLoad ?? scene); // loads MI_Cross
+            //SceneManager.LoadScene(scene);
             // GameManager.instance.SceneIndex = index;
         }
     }

@@ -20,7 +20,7 @@ public class SongSelectMenu : MonoBehaviour
     public Button startButton;
     [Header("use in Song UI shower")]
     public Song_UI_shower last_selected_song;
-    public GameObject level_parent_obj; // Åý Song UI shower ¥i¥H³]©wÃø«× (¥Î child set Active) LevelM
+    public GameObject level_parent_obj; // ï¿½ï¿½ Song UI shower ï¿½iï¿½Hï¿½]ï¿½wï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ child set Active) LevelM
     public Image targetImage;
     public TextMeshProUGUI title;
     public TextMeshProUGUI sub_title;
@@ -28,11 +28,11 @@ public class SongSelectMenu : MonoBehaviour
     public TextMeshProUGUI cube_num;
     public TextMeshProUGUI condition_text;
     [Header("use in Song UI shower")]
-    public GameObject fill_obj;  // ¬°¤F²¾°Ê fill ªº¦ì¸m¡AÅý¨Ï¥ÎªÌ¥i¥H¬Ý¨ì¥Ø«e¿ï¾ÜªºÃø«×
-    private Vector3 fill_obj_pos;  // ¬°¤F²¾°Ê fill ªº¦ì¸m¡AÅý¨Ï¥ÎªÌ¥i¥H¬Ý¨ì¥Ø«e¿ï¾ÜªºÃø«×
-    public AudioSource audioSource;  // ¦s²{¦b¼½©ñªº¤º®e // ¦b Song_UI_shower.cs ¤Á´«
-    public AudioSource nextAudioSource;  // ¤U¤@­Ó¼½©ñªº¤º®e // ¦b Song_UI_shower.cs ¤Á´« // ¥Ø«e¨S¦³¥Î¨ì
-    public LevelData levelData = new LevelData { level = "MI" };  // ¬ö¿ý¹CÀ¸¼Ò¦¡¡A¦b Song_UI_shower select ªº®É­Ô·|³]©w¬° MI¡A§ï¼Ò¦¡¦b¤U¤èªº button Ä²µo·|§ï¦¨ button ¦WºÙ
+    public GameObject fill_obj;  // ï¿½ï¿½ï¿½Fï¿½ï¿½ï¿½ï¿½ fill ï¿½ï¿½ï¿½ï¿½mï¿½Aï¿½ï¿½ï¿½Ï¥ÎªÌ¥iï¿½Hï¿½Ý¨ï¿½Ø«eï¿½ï¿½Üªï¿½ï¿½ï¿½ï¿½ï¿½
+    private Vector3 fill_obj_pos;  // ï¿½ï¿½ï¿½Fï¿½ï¿½ï¿½ï¿½ fill ï¿½ï¿½ï¿½ï¿½mï¿½Aï¿½ï¿½ï¿½Ï¥ÎªÌ¥iï¿½Hï¿½Ý¨ï¿½Ø«eï¿½ï¿½Üªï¿½ï¿½ï¿½ï¿½ï¿½
+    public AudioSource audioSource;  // ï¿½sï¿½{ï¿½bï¿½ï¿½ï¿½ñªº¤ï¿½ï¿½e // ï¿½b Song_UI_shower.cs ï¿½ï¿½ï¿½ï¿½
+    public AudioSource nextAudioSource;  // ï¿½Uï¿½@ï¿½Ó¼ï¿½ï¿½ñªº¤ï¿½ï¿½e // ï¿½b Song_UI_shower.cs ï¿½ï¿½ï¿½ï¿½ // ï¿½Ø«eï¿½Sï¿½ï¿½ï¿½Î¨ï¿½
+    public LevelData levelData = new LevelData { level = "MI" };  // ï¿½ï¿½ï¿½ï¿½ï¿½Cï¿½ï¿½ï¿½Ò¦ï¿½ï¿½Aï¿½b Song_UI_shower select ï¿½ï¿½ï¿½É­Ô·|ï¿½]ï¿½wï¿½ï¿½ MIï¿½Aï¿½ï¿½Ò¦ï¿½ï¿½bï¿½Uï¿½èªº button Ä²ï¿½oï¿½|ï¿½ï¦¨ button ï¿½Wï¿½ï¿½
     private TCP_Client sender;
 
     void Awake()
@@ -59,17 +59,17 @@ public class SongSelectMenu : MonoBehaviour
         get_condition(condition_text);
     }
 
-    // ·í«ö¶s³QÂIÀ»®ÉÄ²µo¡A¨Ã±N Button ¶Ç»¼µ¹¤èªk // ¥D­n¬° ¤¤¶¡¿ï¾Ü level ªº button ¨Ï¥Î
+    // ï¿½ï¿½ï¿½ï¿½ï¿½sï¿½Qï¿½Iï¿½ï¿½ï¿½ï¿½Ä²ï¿½oï¿½Aï¿½Ã±N Button ï¿½Ç»ï¿½ï¿½ï¿½ï¿½ï¿½k // ï¿½Dï¿½nï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ level ï¿½ï¿½ button ï¿½Ï¥ï¿½
     public void OnLevelButtonClick(Button clickedButton)
     {
-        // Àò¨ú«ö¶sªº¦ì¸m
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½m
         Vector3 buttonPosition = clickedButton.transform.localPosition;
         levelData.level = clickedButton.gameObject.name;
 
         int index = GetObjectsIdbyName(levelData.level, level_parent_obj);
         get_note_num(index);
 
-        // ±N UI ¤¸¯À²¾°Ê¨ì«ö¶sªº¦ì¸m // ¤â°Ê½Õ¾ã
+        // ï¿½N UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¨ï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½m // ï¿½ï¿½Ê½Õ¾ï¿½
         RectTransform uiRectTransform = fill_obj.GetComponent<RectTransform>();
         Vector3 offset = new Vector3(84, -51, 0);
         uiRectTransform.localPosition = buttonPosition + offset;
@@ -122,7 +122,7 @@ public class SongSelectMenu : MonoBehaviour
     int GetObjectsIdbyName(string names, GameObject p_obj)
     {
         int count = 0;
-        // ½T«O PObject ¤U¥¼¦b names °}¦C¤¤ªºª«¥ó³QÁôÂÃ
+        // ï¿½Tï¿½O PObject ï¿½Uï¿½ï¿½ï¿½b names ï¿½}ï¿½Cï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Qï¿½ï¿½ï¿½ï¿½
         foreach (Transform child in p_obj.transform)
         {
             if (child.gameObject.activeSelf)
@@ -133,7 +133,7 @@ public class SongSelectMenu : MonoBehaviour
         }
         return count;
     }
-    public void get_note_num(int index) // index ¥Nªí¤¤¶¡ªº¨º­Ó¡A¿ï¾ÜÃø«×¡AÅª¨ú¬Ý¹ïÀ³ªº note ¼Æ¶q
+    public void get_note_num(int index) // index ï¿½Nï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¡Aï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¡AÅªï¿½ï¿½ï¿½Ý¹ï¿½ï¿½ï¿½ï¿½ï¿½ note ï¿½Æ¶q
     {
         string filePath = Path.Combine(Application.streamingAssetsPath, song.dir, song.file_names[index]);
         StartCoroutine(StreamingAssetLoader.ReadFileFromJar(filePath, (json) => {
@@ -151,7 +151,7 @@ public class SongSelectMenu : MonoBehaviour
                 // else if (index == 0) cube_num.text = "MI trial: " + ((int)(beatmap.notes.Count / (Config.group_note_num + 1)) + 1).ToString();
                 if (song.name == Config.Calibration) cube_num.text = "MI trial: 48";
                 // else if (index == 0) cube_num.text = "MI trial: " + ((int)(beatmap.notes.Count / (Config.group_note_num))).ToString();  // 40
-                else if (index == 0) cube_num.text = "MI trial: 48" + ((int)(beatmap.notes.Count / (Config.group_note_num))).ToString();  // 40
+                else if (index == 0) cube_num.text = "MI trial: 48";// + ((int)(beatmap.notes.Count / (Config.group_note_num))).ToString();  // 40
                 else cube_num.text = "Cubes: " + beatmap.notes.Count.ToString();
 
                 /*BeatmapData data = JsonConvert.DeserializeObject<BeatmapData>(json);
@@ -175,7 +175,7 @@ public class SongSelectMenu : MonoBehaviour
             }
         }));
     }
-    // §â BeatmapSpawner.cs ¸Ì­±ªº GroupNotesByRules¡Afunction °µ§ó§ï¡A§ï¦¨¥u¦^¶Ç int ªº function¡A¨Ã©óµe­±¤¤Åã¥Ü¡A¥Ø«e¨S¥Î¨ì
+    // ï¿½ï¿½ BeatmapSpawner.cs ï¿½Ì­ï¿½ï¿½ï¿½ GroupNotesByRulesï¿½Afunction ï¿½ï¿½ï¿½ï¿½ï¿½Aï¿½ï¦¨ï¿½uï¿½^ï¿½ï¿½ int ï¿½ï¿½ functionï¿½Aï¿½Ã©ï¿½eï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü¡Aï¿½Ø«eï¿½Sï¿½Î¨ï¿½
     public int GetGroupCountByRules(List<OldNote> sourceNotes, int n, float bpm)
     {
         float beatsPerSecond = bpm / 60f;
@@ -183,17 +183,17 @@ public class SongSelectMenu : MonoBehaviour
         float beatThreshold_up = (0.6f * Config.group_note_num + 2) * beatsPerSecond;
         float beatThreshold_down = (0.6f * Config.group_note_num) * beatsPerSecond;
         float beatThreshold_1s = 1.0f * beatsPerSecond;
-        // ¦pªG¨S¦³¸ê®Æ¡A¦^¶Ç 0
+        // ï¿½pï¿½Gï¿½Sï¿½ï¿½ï¿½ï¿½Æ¡Aï¿½^ï¿½ï¿½ 0
         if (sourceNotes == null || sourceNotes.Count == 0) return 0;
         if (n <= 0) n = 1;
 
-        // --- ±ø¥ó 1: ¦pªG n = 1¡A¨C­Ó Note ³£¬O¤@²Õ¡Aª½±µ¦^¶ÇÁ`¼Æ ---
+        // --- ï¿½ï¿½ï¿½ï¿½ 1: ï¿½pï¿½G n = 1ï¿½Aï¿½Cï¿½ï¿½ Note ï¿½ï¿½ï¿½Oï¿½@ï¿½Õ¡Aï¿½ï¿½ï¿½ï¿½ï¿½^ï¿½ï¿½ï¿½`ï¿½ï¿½ ---
         if (n == 1)
         {
             return sourceNotes.Count;
         }
 
-        int groupCount = 0; // ¥Î¨Ó­pºâ¦h¤Ö group
+        int groupCount = 0; // ï¿½Î¨Ó­pï¿½ï¿½hï¿½ï¿½ group
         int currentIndex = 0;
         int totalNotes = sourceNotes.Count;
 
@@ -203,7 +203,7 @@ public class SongSelectMenu : MonoBehaviour
             OldNote firstNote = sourceNotes[currentIndex];
             currentGroup.Add(firstNote);
 
-            // --- ¹Á¸Õ´êº¡ n ­Ó¡A¦P®ÉÀË¬d¤W­­­­¨î ---
+            // --- ï¿½ï¿½ï¿½Õ´êº¡ n ï¿½Ó¡Aï¿½Pï¿½ï¿½ï¿½Ë¬dï¿½Wï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ---
             int lookAheadCount = 1;
             while (lookAheadCount < n && (currentIndex + lookAheadCount) < totalNotes)
             {
@@ -217,31 +217,31 @@ public class SongSelectMenu : MonoBehaviour
                 lookAheadCount++;
             }
 
-            // --- ±ø¥ó 3: ÀË¬d¬O§_¹Lµu»Ý­n¥á±ó ---
+            // --- ï¿½ï¿½ï¿½ï¿½ 3: ï¿½Ë¬dï¿½Oï¿½_ï¿½Lï¿½uï¿½Ý­nï¿½ï¿½ï¿½ ---
             bool shouldAddGroup = true;
             if (currentGroup.Count < n)
             {
                 float groupDuration = currentGroup[currentGroup.Count - 1].time - currentGroup[0].time;
-                // ¦pªG¤£¨¬ n ¥B®É¶¡®t¤Óµu -> ¥á±ó
+                // ï¿½pï¿½Gï¿½ï¿½ï¿½ï¿½ n ï¿½Bï¿½É¶ï¿½ï¿½tï¿½Óµu -> ï¿½ï¿½ï¿½
                 if (groupDuration < beatThreshold_down)
                 {
                     shouldAddGroup = false;
                 }
             }
 
-            // --- §ó·s¯Á¤Þ»PÀ³¥Î·s³W«h ---
+            // --- ï¿½ï¿½sï¿½ï¿½ï¿½Þ»Pï¿½ï¿½ï¿½Î·sï¿½Wï¿½h ---
             if (shouldAddGroup)
             {
-                // [­×§ï] ¤£¥Î¥[¤J List¡Aª½±µ­p¼Æ¾¹ + 1
+                // [ï¿½×§ï¿½] ï¿½ï¿½ï¿½Î¥[ï¿½J Listï¿½Aï¿½ï¿½ï¿½ï¿½ï¿½pï¿½Æ¾ï¿½ + 1
                 groupCount++;
 
-                // ¹w³]¡G¸õ¹L Group ¼Æ¶q + 1 (§R°£«á­±¨º¤@­Ó Note)
+                // ï¿½wï¿½]ï¿½Gï¿½ï¿½ï¿½L Group ï¿½Æ¶q + 1 (ï¿½Rï¿½ï¿½ï¿½á­±ï¿½ï¿½ï¿½@ï¿½ï¿½ Note)
                 int skipAmount = currentGroup.Count + 1;
 
-                // ÀË¬d¡G¤U¤@­Ó Note ¬O§_Â÷³o¤@²Õªº³Ì«á¤@­Ó Note ¤Ó»· (> 1¬í)
+                // ï¿½Ë¬dï¿½Gï¿½Uï¿½@ï¿½ï¿½ Note ï¿½Oï¿½_ï¿½ï¿½ï¿½oï¿½@ï¿½Õªï¿½ï¿½Ì«ï¿½@ï¿½ï¿½ Note ï¿½Ó»ï¿½ (> 1ï¿½ï¿½)
                 int nextNoteIndex = currentIndex + currentGroup.Count;
 
-                // ½T«O¨S¦³¶W¥X½d³ò
+                // ï¿½Tï¿½Oï¿½Sï¿½ï¿½ï¿½Wï¿½Xï¿½dï¿½ï¿½
                 if (nextNoteIndex < totalNotes)
                 {
                     OldNote lastNoteInGroup = currentGroup[currentGroup.Count - 1];
@@ -249,24 +249,24 @@ public class SongSelectMenu : MonoBehaviour
 
                     float gap = nextNoteToCheck.time - lastNoteInGroup.time;
 
-                    // ¦pªG¶¡¹j¶W¹L 1 ¬í -> §ï¬°¡u¤£§R°£¡v
-                    // ¤]´N¬O¥u¸õ¹L currentGroup.Count¡A«O¯d nextNoteToCheck µ¹¤U¤@½ü
+                    // ï¿½pï¿½Gï¿½ï¿½ï¿½jï¿½Wï¿½L 1 ï¿½ï¿½ -> ï¿½ï¬°ï¿½uï¿½ï¿½ï¿½Rï¿½ï¿½ï¿½v
+                    // ï¿½]ï¿½Nï¿½Oï¿½uï¿½ï¿½ï¿½L currentGroup.Countï¿½Aï¿½Oï¿½d nextNoteToCheck ï¿½ï¿½ï¿½Uï¿½@ï¿½ï¿½
                     if (gap > beatThreshold_1s)
                     {
                         skipAmount = currentGroup.Count;
                     }
                 }
 
-                // °õ¦æ¯Á¤Þ§ó·s
+                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Þ§ï¿½s
                 currentIndex += skipAmount;
             }
             else
             {
-                // ¦pªG³o²Õ³Q¥á±ó¤F¡A¸õ¹L³o²Õªº Note¡A¤£»Ý­nÃB¥~¦A§R°£«á­±¤@­Ó
+                // ï¿½pï¿½Gï¿½oï¿½Õ³Qï¿½ï¿½ï¿½Fï¿½Aï¿½ï¿½ï¿½Lï¿½oï¿½Õªï¿½ Noteï¿½Aï¿½ï¿½ï¿½Ý­nï¿½Bï¿½~ï¿½Aï¿½Rï¿½ï¿½ï¿½á­±ï¿½@ï¿½ï¿½
                 currentIndex += currentGroup.Count;
             }
         }
-        // ¦^¶Ç­pºâ¥X¨Óªº¼Æ¶q
+        // ï¿½^ï¿½Ç­pï¿½ï¿½Xï¿½Óªï¿½ï¿½Æ¶q
         return groupCount;
     }
 }

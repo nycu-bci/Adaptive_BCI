@@ -10,13 +10,15 @@ public class SaberSlicer : MonoBehaviour
     private Vector3 exitPoint;
     private bool isInsideCube = false;
     private GameManager GM;
+    private Vector3 face_dir;
     private void Start()
     {
         GM = GameManager.instance;
+        face_dir = new Vector3(0, 0, 1);
     }
     private void OnTriggerEnter(Collider other)
     { 
-        if (other.CompareTag("Sliceable"))  // ¤§«á­n¤À¥ª¥kÃä R B ©M¬åªº¤è¦V
+        if (other.CompareTag("Sliceable"))  // ä¹‹å¾Œè¦åˆ†å·¦å³é‚Š R B å’Œç çš„æ–¹å‘
         {
             entryPoint = transform.position;
             isInsideCube =true;
@@ -25,7 +27,7 @@ public class SaberSlicer : MonoBehaviour
         }
     }
 
-    /*private void OnTriggerExit(Collider other) // ­nµ¥¥X¨Ó¦³ÂIºC
+    /*private void OnTriggerExit(Collider other) // è¦ç­‰å‡ºä¾†æœ‰é»æ…¢
     {
         if (other.CompareTag("Sliceable")) //  && isInsideCube
         {
@@ -41,17 +43,17 @@ public class SaberSlicer : MonoBehaviour
     {
         Vector3 sliceDirection = exitPoint - entryPoint;
         Debug.Log("@@@@@@@@@@@@ sliceDirection: " + sliceDirection); // -0.2x left, 0.2x right, -0.2y down, 0.2y up
-        Vector3 planeNormal = Vector3.Cross(sliceDirection, Camera.main.transform.forward).normalized;
+        Vector3 planeNormal = Vector3.Cross(sliceDirection, face_dir).normalized; // Camera.main.transform.forward
         Vector3 planePosition = (entryPoint + exitPoint) / 2f;
         SlicedHull slicedHull = target.Slice(planePosition, planeNormal, crossSectionMaterial);
-        if (slicedHull == null) // ­×´_¥­­±¡A¤Á³Î¦ì¸m³]¬°¤¤¤ß
+        if (slicedHull == null) // ä¿®å¾©å¹³é¢ï¼Œåˆ‡å‰²ä½ç½®è¨­ç‚ºä¸­å¿ƒ
         {
-            Vector3 fallbackPlanePos = target.transform.position;  // ¤¤¤ßÂI
+            Vector3 fallbackPlanePos = target.transform.position;  // ä¸­å¿ƒé»
             slicedHull = target.Slice(fallbackPlanePos, planeNormal, crossSectionMaterial);
             if (slicedHull == null) Debug.LogError("Fallback slice also failed.");
         }
         Destroy(target);
-        if (GM.setLogCallback != null) GM.setLogCallback.Invoke(0, LogType.Cut); // ¬ö¿ı log ¨ì log.txt
+        // if (GM.setLogCallback != null) GM.setLogCallback.Invoke(0, LogType.Cut); // ç´€éŒ„ log åˆ° log.txt
         if (slicedHull != null)
         {
             GameObject upperHull = slicedHull.CreateUpperHull(target, crossSectionMaterial);

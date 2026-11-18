@@ -18,6 +18,7 @@ class EEGDataLoader:
         self.segments = []
         self.labels = []
         self.failures = []  # 20260209 新增，用於 CUT 判斷這個 trial 是否成功
+        self.trial_ids = []  # 每個 segment 對應的 log trial 編號
         self.rec_epoch = None
 
     def load_and_preprocess_data(self):
@@ -44,7 +45,7 @@ class EEGDataLoader:
 
     def _parse_log_file(self, path):
         trials = {}
-        pat = re.compile(r'Trial\s+(\d+)\s+(START|CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?', re.IGNORECASE)
+        pat = re.compile(r'Trial\s+(\d+)\s+(START|CUT|WRONG_CUT|END):\s*([\d\.]+)(?:\s+LABEL:\s*(\d+))?', re.IGNORECASE)
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 m = pat.match(line.strip())
@@ -86,7 +87,7 @@ class EEGDataLoader:
             if 'start' in t and 'end' in t and 'label' in t:
                 # --- 判斷是否失敗 ---
                 cut_list = t.get('cut', [])
-                is_fail = (len(cut_list) < config.group_note_num)  # 如果小於 5 次，標記為 True (失敗)
+                is_fail = ('wrong_cut' in t) or len(cut_list) < config.SUCCESS_CUT_COUNT  # WRONG_CUT 或 CUT 不夠 -> 失敗
                 # ------------------
                 start_rel = t['start'] - self.rec_epoch
                 end_rel = t['end'] - self.rec_epoch
@@ -107,6 +108,7 @@ class EEGDataLoader:
                     self.labels.append(t['label'])
                     # 同步加入 failure 狀態
                     self.failures.append(is_fail)
+                    self.trial_ids.append(idx)
 
     def get_eeg_trial_channel_sample_np(self, slide_windows=None,
                                         slide_windows_stride=20):  # get data x (trail, channel, sample)
@@ -149,6 +151,10 @@ class EEGDataLoader:
         failures_data = np.array(augmented_failures_train)  # 轉成 numpy array (bool)
         # return self.remove_mean(x_data), y_data # 20250901 註解，之前訓練的都有 remove mean，但是 demean 效果比較好，之後可以考慮看看如何使用
         return x_data, y_data, failures_data  # 回傳原始檔案
+
+    def get_trial_ids_np(self):
+        """與 get_eeg_trial_channel_sample_np 回傳的 trial 一一對應的 log trial 編號"""
+        return np.array(self.trial_ids)
 
     def remove_mean(self, x_data):
         # 移除每段的 channel 均值（去 DC）

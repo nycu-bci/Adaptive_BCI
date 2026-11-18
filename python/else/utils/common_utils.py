@@ -96,7 +96,7 @@ CHANNEL_CONFIGS = {
         "channel_index": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "raw_channel_index": [7, 8, 9, 12, 13, 14, 17, 18, 19, 22, 23, 24, 28],
         "ch_names": ['F3', 'Fz', 'F4', 'FC3', 'FCz', 'FC4', 'C3', 'Cz', 'C4', 'CP3', 'CPz', 'CP4', 'Pz'],
-        "mi_filename": "mi.pt",
+        "mi_filename": "mi_13.pt",
         "model_filename": "scc_13_model.pth",
         "eval_record_filename": "13_eval_record.pkl",
         "eval_xb_epochs_filename": "13_eval_xb_epochs.pkl",

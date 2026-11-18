@@ -5,9 +5,12 @@ VR-BCI 線上微調與模型訓練模組 (EEG Training & Fine-Tuning Pipeline)
 
 import os
 import sys
+import csv
 import time
 import shutil
 import random
+import threading
+import traceback
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -33,8 +36,9 @@ import main.Utils.config as config
 import main.Utils.preprocess as preprocess
 import main.Utils.global_value as global_value
 from main.EEG.data_process_np import EEGDataLoader
-from main.EEG.MI_train import BraindecodeTrainer, OnlineCalibrationTrainer
+from main.EEG.MI_train import BraindecodeTrainer, OnlineCalibrationTrainer, ReplayBuffer
 from main.Utils.some_functions import rename_file_with_time, get_next_version_path
+from main.Utils.trial_scoring import score_block
 
 
 class EEGSelfDataLoader:
@@ -236,8 +240,64 @@ def run_braindecode_training(model_class, dataset, dataset_valid, epochs=100, ba
     print(f"\n{config.TAGS.INFO.value} 訓練完成，最佳模型已複製至: {save_path}")
 
 
+class _ModelSlot:
+    """雙模型中的一個 (A 或 B)：各自的 checkpoint 鏈、trainer、replay buffer、暫存 checkpoint tag"""
+
+    def __init__(self, name, prefix, seed):
+        self.name, self.prefix, self.seed = name, prefix, seed
+        self.buffer = ReplayBuffer()
+        self.trainer = None
+        self.save_path = None
+        self.ft_seconds = 0.0
+        self.n_chans = config.N_CHANNELS
+        self.positions = list(range(config.N_CHANNELS))
+
+    @property
+    def base_path(self):  # 這個模型目前最新的 checkpoint，也是下一次微調的起點
+        return getattr(global_value, f"{self.name}_CHECKPOINT")
+
+    def init(self, batch_size, epochs, lr):
+        if os.path.exists(self.base_path):
+            self.n_chans = int(torch.load(self.base_path, map_location="cpu", weights_only=False).get("n_chans", config.N_CHANNELS))
+        self.positions = config.channel_positions(self.n_chans)
+        self.trainer = OnlineCalibrationTrainer(
+            model_class=config.USE_MODEL,
+            model_kwargs=dict(config.LOAD_MODEL_PARAM, channels=self.n_chans),
+            batch_size=batch_size, num_epochs=epochs, lr=lr, ft=True,
+            tag=f"ft{self.name}", seed=self.seed
+        )
+
+    def finetune(self, train_data, train, failures=None):
+        """這個 block 的 window 一定加入自己的 replay buffer；train 為 True 才訓練並存成新的 checkpoint"""
+        x = train_data['x_data'][:, self.positions, :]  # (trial, channel, sample) 取這個模型的通道子集
+        failures = train_data['failures'] if failures is None else failures
+        self.buffer.add(prepare_calibration_dataset([x], [train_data['y_data']], [failures]))
+        self.ft_seconds = 0.0
+        if not train:
+            return False
+
+        start = time.perf_counter()
+        self.save_path = get_next_version_path(os.path.join(config.getSessionCheckpointDir(), "x.pth"), self.prefix)  # 最大編號 + 1
+        self.trainer.load_checkpoint(self.base_path)
+        loss = self.trainer.train(self.buffer.train_set(), self.buffer.val_set())
+        print(f"{config.TAGS.INFO.value} [{self.name}] 線上微調完成，最新 Loss: {loss:.4f}")
+
+        tag = self.trainer.tag
+        best_name = f"{tag}-best.pth" if config.adaption_use_val else f"{tag}-epoch{self.trainer.num_epochs - 1}.pth"
+        checkpoint = torch.load(os.path.join(config.EEG_CHECKPOINT_TMP_BASE_FILE, best_name), map_location="cpu", weights_only=False)
+        checkpoint['n_chans'] = self.n_chans  # predictor 靠這個決定用哪些通道
+        torch.save(checkpoint, self.save_path)
+        setattr(global_value, f"{self.name}_CHECKPOINT", self.save_path)
+        self.ft_seconds = time.perf_counter() - start
+        print(f"{config.TAGS.INFO.value} [{self.name}] 校正微調完成，更新模型至: {self.save_path}")
+        return True
+
+
 class EEGFineTunePipeline:
-    """線上 Calibration 快速微調 Pipeline（使用 Replay Buffer 增量學習）"""
+    """線上 Calibration 快速微調 Pipeline（Replay Buffer 增量學習）：A、B 兩個模型平行、各自判斷要不要微調，只有 live 的送給 Unity"""
+
+    HEADER = ["block", "n_trials", "correct_A", "correct_B", "streak", "live", "ckpt_A", "ckpt_B", "failed", "mode",
+              "ft_A", "ft_B", "ft_seconds", "swap_time", "trigger", "sprt_A", "sprt_B"]
 
     def __init__(self, tcp_server=None):
         self.batch_size = config.adaption_batch_size
@@ -249,23 +309,40 @@ class EEGFineTunePipeline:
         self.seed = 42
         self.ft = True
         self.tcp_server = tcp_server
-        self.trainer = None
-        self.save_path = global_value.NOW_TRAINED_CHECKPOINT
+        self.slots = {
+            "A": _ModelSlot("A", "cA_", 42),
+            "B": _ModelSlot("B", "cB_", 43),
+        }
+        self.streak = 0
+        self.block = 0
+        self.run_counts = {"A": [0, 0], "B": [0, 0]}  # 本 run 的 [Unity 式正確 trial 數, 計分 trial 數]，global_value.runCount 改變時重設
+        self.counter_run = None
+        self.models_changed = False  # 最近一次 run_calibration 有沒有任何模型被微調或 live 模型改變 (沒有的話不用重新載入權重)
+        self.last_row = None  # 最近一個 block 寫進 ab_blocks.csv 的位置，載入新權重後補上 swap_time
+        self.last_trained = {}  # 最近一次 run_calibration 各模型有沒有微調成功 (SPRT 用來判斷哪些 trial 是舊模型的)
 
     def init_pipeline(self):
-        """初始化在線微調器與 Checkpoint 路徑"""
-        self.trainer = OnlineCalibrationTrainer(
-            model_class=config.USE_MODEL,
-            model_kwargs=config.LOAD_MODEL_PARAM,
-            batch_size=self.batch_size,
-            num_epochs=self.epochs,
-            lr=self.lr,
-            ft=self.ft
-        )
-        self.save_path = get_next_version_path(global_value.NOW_TRAINED_CHECKPOINT)
+        """初始化兩個模型的在線微調器"""
+        for slot in self.slots.values():
+            slot.init(self.batch_size, self.epochs, self.lr)
 
-    def run_calibration(self, seed=42):
-        if self.trainer is None:
+    def run_calibration(self, seed=42, sprt=None):
+        """sprt=None：舊的 block gate。SPRT 模式由 sprt_finetune 傳入
+        {"gates": {name: bool}, "trigger": "block"|"sprt", "switch_scores": scores 或 None, "scores": {name: float}}"""
+        self.models_changed = False
+        self.last_trained = {}
+        trials, global_value.last_block_trials = global_value.last_block_trials, None
+        if not trials or not global_value.train_np_data:  # 這次沒有存到新資料（舊資料不重複訓練、不重複計分）
+            print(f"{config.TAGS.WARNING.value} 無新的校正資料，略過微調")
+        else:
+            self._calibrate(trials, seed, sprt)
+
+        if self.tcp_server:
+            time.sleep(0.5)
+            self.tcp_server.broadcast(config.CALIBRATION_FINISH_STR)
+
+    def _calibrate(self, trials, seed, sprt=None):
+        if any(slot.trainer is None for slot in self.slots.values()):
             self.init_pipeline()
 
         random.seed(seed)
@@ -274,39 +351,127 @@ class EEGFineTunePipeline:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
-        name = "ft" if self.ft else "train"
-        if self.ft:
-            self.trainer.load_checkpoint(global_value.NOW_TRAINED_CHECKPOINT)
-
-        if not global_value.train_np_data:
-            print(f"{config.TAGS.WARNING.value} 無可用訓練資料 (train_np_data 為空)")
-            return
-
         latest_data_path = global_value.train_np_data[-1]
         print(f"{config.TAGS.INFO.value} 載入最新校正資料: {latest_data_path}")
-        train_data = torch.load(latest_data_path, map_location="cpu")
+        train_data = torch.load(latest_data_path, map_location="cpu", weights_only=False)
 
-        dataset = prepare_calibration_dataset(
-            [train_data['x_data']],
-            [train_data['y_data']],
-            [train_data['failures']]
-        )
+        scores, per_trial = score_block(trials)  # 微調前計分：live 模型用 Unity 的結果，另一個模型用同一時間的 Unity 式投票
+        live_before = global_value.live_model
+        if sprt is None:
+            self._decide_live(scores)
+            gates = self._gates(scores)
+        else:  # SPRT：gate 由每個 trial 的 SPRT 決定；切換 live 只在 4-trial block 結束時，用這 4 個 trial 的分數
+            if sprt.get("switch_scores") is not None:
+                self._decide_live(sprt["switch_scores"])
+            gates = sprt["gates"]
+        failures = self._failures_per_model(train_data, per_trial)
 
-        loss = self.trainer.online_train(dataset)
-        print(f"{config.TAGS.INFO.value} 線上微調完成，最新 Loss: {loss:.4f}")
+        failed = []
+        trained = {}
+        start = time.perf_counter()
 
-        if config.adaption_use_val:
-            best_loss_path = os.path.join(config.EEG_CHECKPOINT_TMP_BASE_FILE, f"{name}-best.pth")
+        def work(slot):
+            try:
+                trained[slot.name] = slot.finetune(train_data, gates[slot.name], failures[slot.name])
+            except Exception:
+                failed.append(slot.name)
+                traceback.print_exc()
+
+        threads = [threading.Thread(target=work, args=(slot,)) for slot in self.slots.values()]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        ft_seconds = time.perf_counter() - start
+        self.models_changed = any(trained.values()) or global_value.live_model != live_before
+        self.last_trained = {name: bool(trained.get(name)) for name in self.slots}
+
+        global_value.NOW_TRAINED_CHECKPOINT = getattr(global_value, f"{global_value.live_model}_CHECKPOINT")
+        self._log_block(scores, failed, trained, ft_seconds, sprt)
+
+    def _gates(self, scores):
+        """每個模型自己決定要不要微調：本 block 至少錯一個 trial，且本 run 累計的 Unity 式正確率 < finetune_acc_threshold"""
+        if self.counter_run != global_value.runCount:
+            self.counter_run = global_value.runCount
+            self.run_counts = {"A": [0, 0], "B": [0, 0]}
+        gates = {}
+        for name, (correct, scored) in scores.items():
+            self.run_counts[name][0] += correct
+            self.run_counts[name][1] += scored
+            run_correct, run_scored = self.run_counts[name]
+            gates[name] = (scored - correct) >= 1 and run_scored > 0 and run_correct / run_scored < config.FINETUNE_ACC_THRESHOLD
+        return gates
+
+    @staticmethod
+    def _failures_per_model(train_data, per_trial):
+        """live 的模型沿用資料裡的 failure (Unity 的結果)；另一個模型的 failure = 它的 Unity 式投票是錯的"""
+        ids = train_data.get('trial_ids')
+        stored = np.asarray(train_data['failures'])
+        out = {"A": stored, "B": stored}
+        if ids is None or not per_trial:
+            return out
+        for name in ("A", "B"):
+            arr = stored.copy()
+            for row, idx in enumerate(np.asarray(ids)):
+                info = per_trial.get(int(idx))
+                if info is not None and info['live'] != name:
+                    arr[row] = (info[name] is False)
+            out[name] = arr
+        return out
+
+    def _decide_live(self, scores):
+        if global_value.LIVE_MODE in ("A", "B"):
+            global_value.live_model = global_value.LIVE_MODE
+            return
+        acc = {n: (c / k if k else None) for n, (c, k) in scores.items()}
+        cur = global_value.live_model
+        other = "B" if cur == "A" else "A"
+        if acc[cur] is not None and acc[other] is not None and acc[other] > acc[cur]:
+            self.streak += 1
         else:
-            best_loss_path = os.path.join(config.EEG_CHECKPOINT_TMP_BASE_FILE, f"{name}-epoch{self.epochs - 1}.pth")
+            self.streak = 0
+        if self.streak >= config.SWITCH_STREAK:
+            global_value.live_model = other
+            self.streak = 0
+            print(f"{config.TAGS.INFO.value} auto：切換 live 模型 {cur} -> {other}")
 
-        shutil.copyfile(best_loss_path, self.save_path)
-        global_value.NOW_TRAINED_CHECKPOINT = self.save_path
-        print(f"\n{config.TAGS.INFO.value} 校正微調完成，更新主模型至: {self.save_path}")
+    def _log_block(self, scores, failed, trained, ft_seconds, sprt=None):
+        self.block += 1
+        path = os.path.join(config.getRunDataDir(), "ab_blocks.csv")
+        new_file = not os.path.exists(path)
+        sprt_scores = (sprt or {}).get("scores", {})
+        row = [self.block, max(scores["A"][1], scores["B"][1]), scores["A"][0], scores["B"][0],
+               self.streak, global_value.live_model,
+               os.path.basename(global_value.A_CHECKPOINT), os.path.basename(global_value.B_CHECKPOINT),
+               "".join(failed), global_value.run_mode,
+               int(bool(trained.get("A"))), int(bool(trained.get("B"))), f"{ft_seconds:.2f}", "",
+               sprt["trigger"] if sprt else "block",
+               *(f"{sprt_scores[n]:.3f}" if n in sprt_scores else "" for n in ("A", "B"))]
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(self.HEADER)
+            w.writerow(row)
+        self.last_row = (path, self.block)
+        print(f"{config.TAGS.INFO.value} block {self.block}: trial 正確數 A={scores['A']} B={scores['B']} live={global_value.live_model} "
+              f"ft A={row[10]} B={row[11]} ({ft_seconds:.1f}s)")
 
-        if self.tcp_server:
-            time.sleep(0.5)
-            self.tcp_server.broadcast(config.CALIBRATION_FINISH_STR)
+    def record_swap(self, swap_time):
+        """新權重載入後，把載入時間補進最近一個 block 的資料列 (swap_time 欄)"""
+        if not self.last_row:
+            return
+        path, block = self.last_row
+        self.last_row = None
+        try:
+            with open(path, "r", encoding="utf-8", newline="") as f:
+                rows = list(csv.reader(f))
+            for row in rows[1:]:
+                if row and row[0] == str(block):
+                    row[self.HEADER.index("swap_time")] = f"{swap_time:.3f}"
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                csv.writer(f).writerows(rows)
+        except Exception as e:
+            print(f"{config.TAGS.WARNING.value} swap_time 寫入失敗: {e}")
 
 
 class EEGTrainingPipeline:
@@ -329,7 +494,7 @@ class EEGTrainingPipeline:
 
         latest_data_path = global_value.train_np_data[-1]
         print(f"{config.TAGS.INFO.value} 載入訓練資料: {latest_data_path}")
-        train_data = torch.load(latest_data_path, map_location="cpu")
+        train_data = torch.load(latest_data_path, map_location="cpu", weights_only=False)
 
         data_x_list = [train_data['x_data']]
         data_y_list = [train_data['y_data']]

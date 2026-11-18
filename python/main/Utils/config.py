@@ -7,6 +7,7 @@ VR-BCI 系統全域設定模組 (System Configuration)
 import os
 import sys
 import json
+from datetime import datetime
 from enum import Enum
 from braindecode.models import ShallowFBCSPNet, EEGNetv4, EEGConformer, ATCNet
 from main.EEG.models import SCCNet
@@ -85,6 +86,12 @@ N_Class = 2  # left 1, right 0
 USE_MODEL = SCCNet
 LOAD_MODEL_PARAM = dict(samples=SAMPLE_RATE, channels=N_CHANNELS, n_classes=N_Class, sfreq=SAMPLE_RATE)
 verbose = False
+PREDICTION_LOG_OFFSET_S = float(eeg_cfg.get("prediction_log_offset_s", 0.70))  # END - brain vote (CUT / WRONG_CUT), median 0.698 s; only used when a trial has no vote line
+
+
+def channel_positions(n_chans):
+    """Row positions, inside the active channel list, of the n_chans-channel set (e.g. 22 inside 32)."""
+    return [channel_index.index(c) for c in CHANNEL_DEFINITIONS[str(n_chans)]]
 
 # --- 7. 遊戲設定 ---
 game_cfg = JSON_CONFIG.get("game_settings", {})
@@ -92,13 +99,23 @@ group_note_num = int(game_cfg.get("group_note_num", 5))
 cube_space_time = float(game_cfg.get("cube_space_time", 0.7))
 trial_train_interval = int(game_cfg.get("trial_train_interval", 4))
 adaptive_model = bool(game_cfg.get("adaptive_model", False))
+SUCCESS_CUT_COUNT = int(game_cfg.get("success_cut_count", 1))  # trial 成功所需的 CUT 數：新 log (一次腦波投票一個 CUT) 為 1，舊資料為 5
 
 # --- 8. 線上自適應訓練參數 ---
 adapt_cfg = JSON_CONFIG.get("online_adaptation", {})
 adaption_batch_size = int(adapt_cfg.get("batch_size", 8))
-adaption_learning_rate = float(adapt_cfg.get("learning_rate", 1e-3))
+adaption_learning_rate = float(adapt_cfg.get("learning_rate", 2e-3))
 adaption_epochs = int(adapt_cfg.get("epochs", 4))
 adaption_use_val = bool(adapt_cfg.get("use_val", True))
+FINETUNE_ACC_THRESHOLD = float(adapt_cfg.get("finetune_acc_threshold", 0.75))  # 模型本 run 的 Unity 式正確率低於這個值，且本 block 有錯，才微調
+VOTE_OFFSET_S = float(adapt_cfg.get("vote_offset_s", 4.25))  # START 到 Unity 投票的秒數 (run 第一個 trial 用，之後用實測值)
+SWAP_GUARD_S = float(adapt_cfg.get("swap_guard_s", 1.5))  # 投票前多久開始不換新權重
+SWITCH_STREAK = max(1, int(adapt_cfg.get("switch_streak", 2)))  # --live_model auto：另一個模型連續幾個 block 的 trial accuracy 嚴格較高才切換
+FINETUNE_GATE = str(adapt_cfg.get("finetune_gate", "block")).lower()  # "sprt"：每個 trial 的 Wald SPRT 決定微調；"block"：舊的每 4 trial gate
+SPRT_P0 = float(adapt_cfg.get("sprt_p0", 0.65))  # SPRT H0 (差) 的正確率
+SPRT_P1 = float(adapt_cfg.get("sprt_p1", 0.85))  # SPRT H1 (夠好) 的正確率
+SPRT_ALPHA = float(adapt_cfg.get("sprt_alpha", 0.05))  # 差的模型被判「好」(該微調卻沒微調) 的機率
+SPRT_BETA = float(adapt_cfg.get("sprt_beta", 0.2))  # 好的模型被判「差」(不需要卻微調) 的機率
 
 # --- 9. 檔案目錄設定 (跨平台標準寫法) ---
 __REALTIME_BASE_FILE = os.path.join(BASE_FILE, "real_time_data")
@@ -126,6 +143,32 @@ SENT_UNITY_CALIBRATION_DONE_STR = "SENT_UNITY_CALIBRATION_DONE_STR"
 CALIBRATION_FINISH_STR = "calibration done"
 
 
+def getSessionDir():
+    """有指定受試者與 session 時回傳 real_time_data/sub{S}/ses{N}，否則回傳 real_time_data"""
+    try:
+        import main.Utils.global_value as global_value
+        subject, session = global_value.subject, global_value.session
+    except Exception:
+        subject = session = ""
+    if subject and session:
+        return os.path.join(__REALTIME_BASE_FILE, f"sub{subject}", f"ses{session}")
+    return __REALTIME_BASE_FILE
+
+
+def getSessionLogPath():
+    """整個 Python 程序的 stdout log：sub{S}/ses{N}/session_log_<時間>.txt (和 run*/log_*.txt 的 Unity log 分開)"""
+    d = getSessionDir()
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"session_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+
+
+def getSessionCheckpointDir():
+    """微調後的 cA_NNN / cB_NNN 存放處：sub{S}/ses{N}/checkpoints"""
+    d = os.path.join(getSessionDir(), "checkpoints")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def getRunDataDir():
     """依據當前 global_value.runCount 回傳對應 run 資料夾路徑"""
     try:
@@ -133,7 +176,7 @@ def getRunDataDir():
         run_count = global_value.runCount
     except Exception:
         run_count = 0
-    runDir = os.path.join(__REALTIME_BASE_FILE, f"run{run_count}")
+    runDir = os.path.join(getSessionDir(), f"run{run_count}")
     os.makedirs(runDir, exist_ok=True)
     return runDir
 

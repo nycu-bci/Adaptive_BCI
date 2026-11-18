@@ -65,22 +65,18 @@ class BraindecodeTrainer:
 
     def load_checkpoint(self, checkpoint_path):
         """載入 Checkpoint，若偵測到通道數或維度不匹配則自動生成隨機權重修復"""
-        try:
-            if not os.path.exists(checkpoint_path):
-                raise FileNotFoundError(f"找不到檔案: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-        except Exception as e:
-            print(f"\n⚠️ [WARNING] 載入 Checkpoint 失敗 ({e})。偵測到維度或通道數不匹配。")
+        if not os.path.exists(checkpoint_path):  # 只有檔案不存在才產生隨機權重；維度不匹配會直接報錯，不再覆蓋檔案
+            print(f"\n⚠️ [WARNING] 找不到檔案: {checkpoint_path}，產生隨機初始權重。")
             from main.EEG.generate_random_models import create_matching_random_checkpoint
-            checkpoint = create_matching_random_checkpoint(
+            create_matching_random_checkpoint(
                 target_path=checkpoint_path,
                 model_class=self.model_class,
                 n_chans=config.N_CHANNELS,
                 n_outputs=config.N_Class,
                 n_times=config.SAMPLE_RATE
             )
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
 
         self.model.to(self.device)
         print(f"{config.TAGS.INFO.value} 成功載入模型權重: {checkpoint_path}")
@@ -220,99 +216,107 @@ def load_sccnet_params(dataset):
     )
 
 
+class ReplayBuffer:
+    """
+    單一模型的 Replay Buffer (只存資料，不訓練)：每個類別最多 limit 個 window 的 FIFO，
+    被擠出或新進的 window 同時進驗證部分 (上限 limit 的 40%)。失敗 trial 的 window 權重加倍。
+    """
+
+    def __init__(self, limit=None, use_val=None, fail_weight=2.0):
+        self._limit, self._use_val = limit, use_val
+        self.fail_weight = fail_weight
+        self.train = {0: [], 1: []}  # label -> [(x, y, weight)]，最舊的在前
+        self.val = {0: [], 1: []}
+
+    @property
+    def limit(self):
+        return self._limit if self._limit is not None else config.REPLAY_BUFFER_LIMIT
+
+    @property
+    def use_val(self):
+        return self._use_val if self._use_val is not None else config.adaption_use_val
+
+    def add(self, dataset):
+        """dataset: TensorDataset(x, y_onehot, failure)。FIFO 規則與原本 OnlineCalibrationTrainer.add_to_buffer 相同"""
+        if dataset is None or len(dataset) == 0:
+            return
+        xs, ys, fails = dataset.tensors
+        for i in range(len(xs)):
+            label = int(torch.argmax(ys[i]).item())
+            item = (xs[i].cpu(), ys[i].cpu(), self.fail_weight if fails[i].item() > 0.5 else 1.0)
+            self.train.setdefault(label, []).append(item)
+            self.val.setdefault(label, [])
+            if len(self.train[label]) > self.limit:  # 超過上限：最舊的移到驗證部分
+                oldest = self.train[label].pop(0)
+                if self.use_val:
+                    self.val[label].append(oldest)
+            elif self.use_val:
+                self.val[label].append(item)
+            if self.use_val and len(self.val[label]) > int(self.limit * 0.4):
+                self.val[label].pop(0)
+
+    @staticmethod
+    def _to_dataset(parts):
+        items = [item for label in parts for item in parts[label]]
+        if not items:
+            return None
+        return TensorDataset(torch.stack([it[0] for it in items]), torch.stack([it[1] for it in items]),
+                             torch.tensor([it[2] for it in items], dtype=torch.float32))
+
+    def train_set(self):
+        return self._to_dataset(self.train)
+
+    def val_set(self):
+        return self._to_dataset(self.val) if self.use_val else None
+
+    def sizes(self):
+        """(每個類別的訓練 window 數, 每個類別的驗證 window 數)"""
+        return {k: len(v) for k, v in self.train.items()}, {k: len(v) for k, v in self.val.items()}
+
+
 class OnlineCalibrationTrainer(BraindecodeTrainer):
-    """基於 Replay Buffer 的在線校正增量學習器 (支援失敗經驗加權)"""
+    """在線校正微調器：只負責訓練 (資料由 ReplayBuffer 提供)，支援失敗經驗加權"""
 
     def __init__(self, dataset=None, val_dataset=None, model_class=config.USE_MODEL, model_kwargs=None,
-                 batch_size=16, num_epochs=100, lr=1e-4, device=None, ft=False):
+                 batch_size=16, num_epochs=100, lr=1e-4, device=None, ft=False,
+                 tag=None, seed=None):
         super().__init__(dataset, val_dataset, model_class, model_kwargs,
                          batch_size, num_epochs, lr, device, ft)
         self.online_lr = lr
-        self.fail_weight = 2.0
         self.use_val = config.adaption_use_val
+        # 雙模型 A/B 各自的暫存 checkpoint 名稱與 shuffle 種子
+        self.tag = tag or ("ft" if ft else "train")
+        self.gen = torch.Generator().manual_seed(seed) if seed is not None else None
 
     def _load_data(self):
-        pass  # 數據由 online_train 傳入
+        pass  # 數據由 train 傳入
 
     def _init_model(self):
         super()._init_model()
         self.criterion_none = nn.CrossEntropyLoss(reduction='none')
 
-    def add_to_buffer(self, x, y, is_fail):
-        """將樣本加入全域 Replay Buffer，並執行 FIFO 淘汰"""
-        label_idx = int(torch.argmax(y).item())
-        weight = self.fail_weight if is_fail else 1.0
-
-        if label_idx not in global_value.replay_buffer:
-            global_value.replay_buffer[label_idx] = []
-
-        new_data = (x.cpu(), y.cpu(), weight)
-        global_value.replay_buffer[label_idx].append(new_data)
-
-        # FIFO: 超過上限時彈出最舊資料至 Val Buffer
-        if len(global_value.replay_buffer[label_idx]) > config.REPLAY_BUFFER_LIMIT:
-            popped_data = global_value.replay_buffer[label_idx].pop(0)
-            if self.use_val:
-                global_value.replay_buffer_val[label_idx].append(popped_data)
-        else:
-            if self.use_val:
-                global_value.replay_buffer_val[label_idx].append(new_data)
-
-        if self.use_val:
-            val_limit = int(config.REPLAY_BUFFER_LIMIT * 0.4)
-            if len(global_value.replay_buffer_val.get(label_idx, [])) > val_limit:
-                global_value.replay_buffer_val[label_idx].pop(0)
-
-    def online_train(self, dataset):
-        """接收校正數據進行線上微調"""
-        if dataset is None or len(dataset) == 0:
+    def train(self, train_set, val_set=None):
+        """在 train_set (x, y, weight) 上微調 num_epochs 個 epoch，val_set 上 loss 最低的 epoch 權重存成 {tag}-best.pth"""
+        if train_set is None or len(train_set) == 0:
             print(f"{config.TAGS.WARNING.value} 無有效線上訓練資料")
             return 0.0
 
         start_time = time.perf_counter()
-        tag = "ft" if self.ft else "train"
+        tag = self.tag
         self.model.train()
 
-        x_new, y_new, failures = dataset.tensors
+        online_loader = DataLoader(train_set, batch_size=self.batch_size, shuffle=True, generator=self.gen)
+        optimizer = optim.Adam(self.model.parameters(), lr=self.online_lr)
 
-        # 1. 寫入 Replay Buffer
-        for i in range(len(x_new)):
-            is_fail = (failures[i].item() > 0.5)
-            self.add_to_buffer(x_new[i], y_new[i], is_fail)
-
-        # 2. 從 Buffer 重構訓練資料
-        train_samples = []
-        for label_idx in global_value.replay_buffer:
-            train_samples.extend(global_value.replay_buffer[label_idx])
-
-        if not train_samples:
-            return 0.0
-
-        batch_x = torch.stack([item[0] for item in train_samples])
-        batch_y = torch.stack([item[1] for item in train_samples])
-        batch_w = torch.tensor([item[2] for item in train_samples], dtype=torch.float32)
-
-        online_dataset = TensorDataset(batch_x, batch_y, batch_w)
-        online_loader = DataLoader(online_dataset, batch_size=self.batch_size, shuffle=True)
-        optimizer = optim.Adam(self.model.parameters(), lr=self.online_lr * 2.0)
-
-        # 3. 準備驗證集
         val_loader = None
-        if self.use_val:
-            val_samples = []
-            for label_idx in global_value.replay_buffer_val:
-                val_samples.extend(global_value.replay_buffer_val[label_idx])
-            if val_samples:
-                val_x = torch.stack([item[0] for item in val_samples])
-                val_y = torch.stack([item[1] for item in val_samples])
-                val_w = torch.tensor([item[2] for item in val_samples], dtype=torch.float32)
-                val_loader = DataLoader(TensorDataset(val_x, val_y, val_w), batch_size=self.batch_size, shuffle=False)
+        if self.use_val and val_set is not None and len(val_set) > 0:
+            val_loader = DataLoader(val_set, batch_size=self.batch_size, shuffle=False)
 
         best_loss = float('inf')
         best_model_state = None
         last_avg_loss = 0.0
 
-        # 4. 微調迴圈
+        # 微調迴圈
         for epoch in range(self.num_epochs):
             total_loss = 0.0
             for inputs, labels, weights in online_loader:

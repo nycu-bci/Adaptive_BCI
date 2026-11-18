@@ -1,5 +1,6 @@
 import main.Utils.config as config
 from pylsl import StreamInfo, StreamOutlet, resolve_byprop, StreamInlet, resolve_streams
+from main.Utils.TCPServer import on_lsl_connected
 
 
 def setup_lsl_inlet(stream_name=config.RECEIVE_CYGNUS_LSL_STREAM, timeout=5.0):
@@ -15,6 +16,7 @@ def setup_lsl_inlet(stream_name=config.RECEIVE_CYGNUS_LSL_STREAM, timeout=5.0):
         raise RuntimeError(f"{config.TAGS.ERROR.value} Could not resolve LSL stream: {stream_name}")
     inlet = StreamInlet(streams[0], recover=True)
     print(f"{config.TAGS.INFO.value} Connected to LSL stream:", streams[0].name())
+    on_lsl_connected()
     return inlet
 
 

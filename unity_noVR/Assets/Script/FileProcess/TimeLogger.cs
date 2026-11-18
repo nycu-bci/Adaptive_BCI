@@ -5,8 +5,9 @@ using System;
 using UnityEditor;
 public enum LogType
 {
-    Spawn, // note spawn at specific point // ¥Ø«e¥Ñ forward µo°e
+    Spawn, // note spawn at specific point // ç›®å‰ç”± forward ç™¼é€
     Cut, // cutting note
+    WrongCut, // wrong brain vote, logged at the vote time
     End  // undo
 }
 
@@ -20,7 +21,7 @@ public class TimeLogger : MonoBehaviour
     // private string filePath;
     // private Send_LSL_Marker sender;
     private TCP_Client TC;
-    private int trial_train_interval_counter;  // ¥Î©ó TimeLogger.cs¡A¨C N ­Ó trial ´N§ó·s¤@¦¸¼Ò«¬¡ATimeLogger ¦b end ªº®É­Ô¡A³qª¾§ó·s¼Ò«¬
+    private int trial_train_interval_counter;  // ç”¨æ–¼ TimeLogger.csï¼Œæ¯ N å€‹ trial å°±æ›´æ–°ä¸€æ¬¡æ¨¡å‹ï¼ŒTimeLogger åœ¨ end çš„æ™‚å€™ï¼Œé€šçŸ¥æ›´æ–°æ¨¡å‹
     #region sigleton
     private void Awake()
     {
@@ -41,14 +42,14 @@ public class TimeLogger : MonoBehaviour
     AutoSaber AS; 
     void Start()
     {
-        // ÀÉ®×¸ô®|¡GÀx¦s¦b PersistentDataPath ¤U¡AÁ×§K¥­¥x¬Û®e°İÃD
+        // æª”æ¡ˆè·¯å¾‘ï¼šå„²å­˜åœ¨ PersistentDataPath ä¸‹ï¼Œé¿å…å¹³å°ç›¸å®¹å•é¡Œ
         // filePath = Path.Combine(Application.persistentDataPath, fileName);
-        //filePath = fileName; // ·|ª½±µ¥Í¦b±M®×©³¤W
+        //filePath = fileName; // æœƒç›´æ¥ç”Ÿåœ¨å°ˆæ¡ˆåº•ä¸Š
         //File.WriteAllText(filePath, String.Empty); // clear all
         GM = GameManager.instance;
         // sender = Send_LSL_Marker.instance;
         TC = TCP_Client.instance;
-        // ¶}©l¬ö¿ı¨óµ{
+        // é–‹å§‹ç´€éŒ„å”ç¨‹
         if (GM.is_record_eeg_log) GM.setLogCallback += LogStringAndTime;
         trial_train_interval_counter = Config.trial_train_interval;
 
@@ -76,8 +77,9 @@ public class TimeLogger : MonoBehaviour
     {
         double timestamp = Timer.GetUnixTimestamp();
         // Debug.Log($"@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ FPS: {fps:F1}");
-        string log = $"Trial {trialCount} START: {timestamp:F3} LABEL: {label}";
+        string log = $"Trial {trialCount} START: {timestamp:F3} LABEL: {label} MODE: {(Config.adaptive_model ? "Adaptive" : "Static")}";
         if (type == LogType.Cut) log = $"Trial {trialCount} CUT: {timestamp:F3}";
+        if (type == LogType.WrongCut) log = $"Trial {trialCount} WRONG_CUT: {timestamp:F3}";
         if (type == LogType.End) log = $"Trial {trialCount} END: {timestamp:F3} LABEL: {label}";
         // Debug.Log(log);
         // sender.lsl_send_string_to_python(log) ;
@@ -85,7 +87,7 @@ public class TimeLogger : MonoBehaviour
         //WriteLineToFile(log);
         if (type == LogType.End)
         {
-            GM.onSaberCutCallback.Invoke(); // ³B¸Ì UI ­p¤À©Î¬O¨ä¥L¬ÛÃö¨Æ¥ó
+            GM.onSaberCutCallback.Invoke(); // è™•è£¡ UI è¨ˆåˆ†æˆ–æ˜¯å…¶ä»–ç›¸é—œäº‹ä»¶
             trialCount++;
             trial_train_interval_counter -= 1;
             if (trial_train_interval_counter <= 0)
@@ -101,7 +103,7 @@ public class TimeLogger : MonoBehaviour
                     {
                         TC.send_string_to_python(Config.send_python_tcp_calibration_start);
                     }
-                    else // ¤À¼Æ¤j©óµ¥©ó 0.75 ©Î¬O 4 ­Ó trial ¥ş¹ï¡A´N´N¤£§ó·s¼Ò«¬
+                    else // åˆ†æ•¸å¤§æ–¼ç­‰æ–¼ 0.75 æˆ–æ˜¯ 4 å€‹ trial å…¨å°ï¼Œå°±å°±ä¸æ›´æ–°æ¨¡å‹
                     {
                         TC.send_string_to_python("Correct 4 trial or acc > 0.75. Don't update model");
                         Debug.Log("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@: correct 4 trial");
@@ -116,7 +118,7 @@ public class TimeLogger : MonoBehaviour
         }
     }
 
-    public void reset_trialCount() // ­«·s³]©w¶Ç°eªº trial count¡A¥Î©ó Calibration2 (¦]¬°¥¦·|°eµ¹ python ¨ºÃä°±¤î log ¨Ã­«¼gªº¥\¯à)
+    public void reset_trialCount() // é‡æ–°è¨­å®šå‚³é€çš„ trial countï¼Œç”¨æ–¼ Calibration2 (å› ç‚ºå®ƒæœƒé€çµ¦ python é‚£é‚Šåœæ­¢ log ä¸¦é‡å¯«çš„åŠŸèƒ½)
     {
         trialCount = 0; 
     }
@@ -128,7 +130,7 @@ public class TimeLogger : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError("¼g¤JÀÉ®×¿ù»~: " + e.Message);
+            Debug.LogError("å¯«å…¥æª”æ¡ˆéŒ¯èª¤: " + e.Message);
         }
     }*/
 }

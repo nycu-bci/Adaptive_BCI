@@ -4,6 +4,7 @@ import threading
 import numpy as np
 from datetime import datetime
 import os
+import re
 
 
 def rename_file_with_time(name):
@@ -15,31 +16,43 @@ def rename_file_with_time(name):
     return f"{file_name}_{formatted_time}{file_extension}"
 
 
-def get_next_version_path(base_path):
+def highest_version(directory, prefix, ext=".pth"):
+    """directory 底下 {prefix}NNN{ext} 的最大編號，沒有則回傳 None"""
+    pat = re.compile(rf"^{re.escape(prefix)}(\d+){re.escape(ext)}$")
+    nums = [int(m.group(1)) for f in (os.listdir(directory) if os.path.isdir(directory) else [])
+            for m in [pat.match(f)] if m]
+    return max(nums) if nums else None
+
+
+def get_next_version_path(base_path, prefix="c_"):
     """
-    輸入預設路徑 (例如 .../c_000.pth)，
-    如果該檔案存在，自動尋找下一個編號 (c_001.pth, c_002.pth...)
-    :return 可以的路徑名稱
+    回傳 base_path 所在資料夾裡「最大編號 + 1」的路徑 (例如已有 cA_001、cA_004 -> cA_005.pth)，
+    資料夾沒有任何 {prefix}NNN 時從 001 開始。這樣最大的編號永遠是最新的，刪掉中間的檔案也不會被補回。
     """
-    # 1. 分離目錄與檔名
     directory, filename = os.path.split(base_path)
-    # 2. 分離檔名與副檔名 (例如 name='c_000', ext='.pth')
-    name, ext = os.path.splitext(filename)
+    ext = os.path.splitext(filename)[1]
+    top = highest_version(directory, prefix, ext)
+    return os.path.join(directory, f"{prefix}{(top or 0) + 1:03d}{ext}")
 
-    # 設定前綴與初始計數
-    # 假設你的命名固定是 'c_' 開頭
-    prefix = "c_"
-    counter = 0
 
-    while True:
-        # 3. 組合新檔名，使用 :03d 確保是三位數補零 (例如 0 -> 000, 1 -> 001)
-        new_filename = f"{prefix}{counter:03d}{ext}"
-        candidate_path = os.path.join(directory, new_filename)
-
-        # 4. 檢查檔案是否存在
-        if not os.path.exists(candidate_path):
-            # 如果不存在，表示這個檔名可用，回傳此路徑
-            return candidate_path
-
-        # 如果存在，計數器 +1，繼續迴圈
-        counter += 1
+def resolve_start_checkpoint(prefix, start_from="session"):
+    """
+    決定 A / B 各自的起點 checkpoint (prefix 為 "cA_" 或 "cB_")。
+      base    : checkpoint_main/{prefix}000.pth
+      session : 這個 session 的 checkpoints/ 裡編號最大的，沒有就用 base
+      subject : 這個受試者編號最大、且有 checkpoint 的 session 裡編號最大的，沒有就用 base
+    """
+    base = os.path.join(config.EEG_CHECKPOINT_MAIN_BASE_FILE, f"{prefix}000.pth")
+    if start_from == "base":
+        return base
+    session_ckpt = os.path.join(config.getSessionDir(), "checkpoints")
+    candidates = [session_ckpt]
+    if start_from == "subject":
+        subject_dir = os.path.dirname(config.getSessionDir())
+        sessions = [d for d in os.listdir(subject_dir) if d.startswith("ses") and d[3:].isdigit()] if os.path.isdir(subject_dir) else []
+        candidates = [os.path.join(subject_dir, d, "checkpoints") for d in sorted(sessions, key=lambda d: -int(d[3:]))]
+    for directory in candidates:
+        top = highest_version(directory, prefix)
+        if top is not None:
+            return os.path.join(directory, f"{prefix}{top:03d}.pth")
+    return base

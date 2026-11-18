@@ -56,6 +56,8 @@ def run_pipeline():
                         help="關閉標籤排序")
     parser.add_argument("--overwrite_np", action="store_true", default=False,
                         help="是否覆蓋已存在的 .pt 檔案")
+    parser.add_argument("--success_cut_count", type=int, default=1,
+                        help="資料轉換時 trial 成功所需的 CUT 數；舊 log (成功的 trial 有 5 個 CUT) 請用 5 (預設: 1)")
 
     # 訓練相關參數
     parser.add_argument("--train_mode", type=str, default="both", choices=["per_run", "all_runs", "both"],
@@ -121,7 +123,8 @@ def run_pipeline():
                 output_dir=args.output_dir,
                 channels=args.channels,
                 do_arrange_by_label=args.arrange_by_label,
-                overwrite=args.overwrite_np
+                overwrite=args.overwrite_np,
+                success_cut_count=args.success_cut_count
             )
             print(f"⏱️ 階段 1 完成，耗時: {time.time() - t0:.2f} 秒\n")
 

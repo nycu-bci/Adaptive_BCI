@@ -1,10 +1,21 @@
-# VR_BCI
+# BeatSaber
+
+This project is variant of VRBCI from github.com/stereomp3/VR_BCI
 
 交接文件: https://hackmd.io/@cecnlCECNL/SkbdNyUmfe
 
 ![](./picture/SystemOverviewAdaptive.png)
 
 **啟動步驟: Python 執行 `python/main_start.py`，unity 再執行程式碼**。
+
+```bash
+python python/main_start.py --subject 01 --session 1                       # 預設：A 控制遊戲，B 在背景同步微調
+python python/main_start.py --subject 01 --session 1 --live_model B        # B 控制遊戲
+python python/main_start.py --subject 01 --session 1 --live_model auto --start_model A  # 依表現自動切換 (見「雙模型 A/B 平行微調系統」)
+python python/main_start.py --subject 01 --session 2 --start_from subject  # A、B 各自接續這個受試者最新的 checkpoint (session | base | subject)
+```
+
+線上系統現在同時有 **A、B 兩個模型**，起始模型需放在 `python/main/EEG/checkpoint_main/`：`cA_000.pth` (預訓練 22 通道) 與 `cB_000.pth` (隨機初始化 32 通道，缺少時自動產生)。
 
 現在有新增 v1.0 release 的版本，不需要 VR heatset，直接下載就連接腦波帽就可以測試。
 
@@ -73,7 +84,7 @@ python python/check_env.py
 
 # 運行流程圖示
 
-4 個 Trial update 一次，進行 online update
+4 個 Trial update 一次，進行 online update (A、B 兩個模型同時微調，詳見「雙模型 A/B 平行微調系統」)
 
 ![](./picture/AdaptiveCondition.png)
 
@@ -158,7 +169,7 @@ python python/check_env.py
 
 執行程式碼，會根據 unity 那邊選取歌曲，把使用者資料存入到 `real_time_data` 下面，會根據 run 儲存 csv (data) 與 txt (label)，儲存的 pt 為 calibration 加入到 buffer 裡面的 data。
 
-程式碼執行的時候，在訓練完成模型會拿取 loss 最低的，然後放入到 `EEG/checkpoint_main` 下面，存成 `c_xxx` 的形式。
+程式碼執行的時候，在訓練完成模型會拿取 loss 最低的，然後放入到 `EEG/checkpoint_main` 下面，A 存成 `cA_xxx`、B 存成 `cB_xxx` 的形式 (例如 `cA_001.pth`、`cB_001.pth`)。
 
 ### 1. 快速測試工具集 (`python/tools/`)
 
@@ -187,7 +198,8 @@ python python/check_env.py
 ### 2. 隨機模型初始化與通道不匹配 (Size Mismatch) 自動修復
 
 當在 `config.json` 切換通道數（例如從 32 改為 13 或 22 通道）時，預設權重可能會產生維度衝突。本專案具備**雙重保護機制**：
-- **自動修復機制**：即時預測 (`EEGPrediction.py`) 與線上微調 (`MI_train.py`) 在載入 Checkpoint 時若偵測到維度不匹配，系統會**自動捕捉異常並即時生成符合當前通道數的隨機初始權重覆蓋儲存**，保證遊戲不中斷閃退。
+- **自動產生機制**：即時預測 (`EEGPrediction.py`) 與線上微調 (`MI_train.py`) 載入 Checkpoint 時，若**檔案不存在**，系統會即時生成符合當前通道數的隨機初始權重並存檔 (例如第一次啟動時的 `cB_000.pth`)。
+- **維度不匹配時直接報錯，不會覆蓋檔案**：舊版會把不匹配的 Checkpoint 以隨機權重覆蓋，現在改為拋出錯誤，避免弄丟預訓練模型 (例如把 22 通道模型誤放進 32 通道設定)。每個 Checkpoint 會記錄 `n_chans`，預測器依此自動從 32 通道 buffer 取出該模型的通道子集 (22 通道預訓練模型可在 `active_channels: 32` 下使用)。
 - **手動隨機模型產生工具** (`python/main/EEG/generate_random_models.py`)：
   可隨時手動為所有架構（`SCCNet`, `ShallowFBCSPNet`, `EEGNetv4`, `EEGConformer`, `ATCNet`）產生隨機權重：
   ```bash
@@ -205,24 +217,135 @@ python python/check_env.py
 * `main_start.py`: 系統啟動主入口 (啟動 TCP 伺服器與遊戲狀態機)
 * `game_state.py`: 遊戲狀態機 (管理 Lobby, Calibration, MI, BeatSaber, Training 狀態切換)
 * `EEG/`
-  * `checkpoint_main/`: 放主要模型資料夾 (出現在 Lobby 模型選擇清單中，包含 `c_000.pth`, `model.pth`)
+  * `checkpoint_main/`: 放主要模型資料夾 (出現在 Lobby 模型選擇清單中，包含 `cA_000.pth` (A 起始模型)、`cB_000.pth` (B 起始模型)、`model.pth`；微調後依序產生 `cA_001.pth…`、`cB_001.pth…`)
   * `checkpoints/`: 訓練暫存模型資料夾 (儲存各 Epoch 模型權重)
   * `CygnusEEGReader.py`: Cygnus 腦波資料讀取與 buffer 管理 (具備友善離線自動回退模擬)
-  * `EEGPrediction.py`: 即時腦波特徵推論與 Unity Marker 發送 (具備維度 mismatch 自動隨機權重修復)
-  * `EEG_Train.py`: 線上自適應訓練排程、Replay Buffer 管理與 FT Pipeline
+  * `EEGPrediction.py`: 即時腦波特徵推論與 Unity Marker 發送 (A、B 各一個 predictor，只有 live 的送給 Unity；依 checkpoint 的 `n_chans` 取通道子集)
+  * `EEG_Train.py`: 線上自適應訓練排程、Replay Buffer 管理與 FT Pipeline (A、B 兩個 `_ModelSlot` 以兩條執行緒平行微調、live 模型選擇)
   * `MI_train.py`: 線上模型微調與訓練器核心
   * `data_process_np.py`: 讀取 CSV / Log 並提取為 Numpy 腦波 Epoch
   * `models.py`: 定義 SCCNet 等客製模型架構
   * `generate_random_models.py`: 隨機模型初始化與維度修復工具
 * `Utils/`
   * `config.py`: 集中讀取 `config.json`，管理所有網路、通道與演算法常數
-  * `global_value.py`: 跨執行緒動態共用狀態 (目前模型名稱、執行緒 Lock、Replay Buffer 等)
+  * `global_value.py`: 跨執行緒動態共用狀態 (目前模型名稱、執行緒 Lock、A/B checkpoint 路徑、live / broadcast 模型、vote flag、預測紀錄等)
+  * `trial_scoring.py`: Unity 式逐 trial 計分 (CUT / WRONG_CUT + 同時間重算的 100 筆加權投票)、vote flag、`predictions.csv`、END 行 `MODEL_PREDICTION` 文字
   * `TCPServer.py`: 高可靠性 TCP 伺服器，負責與 Unity 雙向傳遞狀態與控制字串
   * `UnityMarkerReader.py`: 解析 Unity 傳送之事件 Marker 與狀態切換
   * `file_pointer_reader.py`: 指標式增量 CSV/Log 讀取器 (避免 Calibration 重複讀取檔案，大幅加速)
   * `preprocess.py`: 帶通濾波、去均值與特徵前處理
-  * `some_functions.py`: 檔案命名與版本號自動遞增工具
+  * `some_functions.py`: 檔案命名與版本號自動遞增工具 (`get_next_version_path(base, prefix)` 取現有最大編號 + 1，A 用 `cA_`、B 用 `cB_`；`resolve_start_checkpoint` 實作 `--start_from`)
 
+
+
+### 4. 雙模型 A/B 平行微調系統
+
+系統同時維護兩個模型，只有 live 的那個把預測送給 Unity (B 預設不影響遊戲)。**每個 block 兩個模型各自判斷要不要微調**：用 Unity 的真實投票結果計分，只有「本 block 有錯、且本 run 的正確率 < 0.75」的模型才微調，兩個模型每個 block 都會把資料存進自己的 Replay Buffer。
+
+| | A | B |
+|---|---|---|
+| 起始模型 | `cA_000.pth`，預訓練，22 通道 | `cB_000.pth`，隨機初始化，32 通道 |
+| 使用通道 | 從 32 通道 buffer 取 22 通道 (`config.json` 的 "22" 通道組) | 32 通道 |
+| Checkpoint 鏈 | `cA_001, cA_002, …` | `cB_001, cB_002, …` |
+| Replay Buffer / 暫存檔 | 各自一個 `ReplayBuffer`、`ftA-*.pth` | 各自一個 `ReplayBuffer`、`ftB-*.pth` |
+
+**Unity 送出的 log (TCP，一行一則)**
+
+```text
+Trial 8 START: 1791884622.154 LABEL: 0 MODE: Adaptive
+Trial 8 WRONG_CUT: 1791884626.400            # 腦波投票錯誤的那一刻 (投對時是 Trial N CUT: <ts>)
+Trial 8 END: 1791884627.097 LABEL: 0 MODEL_PREDICTION: A=1 B=0 LIVE=B AT: 1791884626.400   # MODEL_PREDICTION 由 Python 寫入 log
+```
+
+- 每個 trial 最多一行 `CUT` (投對) 或 `WRONG_CUT` (投錯)，都是 Unity `AutoSaber` 投票當下記錄的。舊版 Unity 沒有 `WRONG_CUT`/`MODE`，Python 會退回舊行為 (沒有 CUT 視為錯，投票時間用 END − `prediction_log_offset_s`)。
+- `AT` = 該 trial 的投票時間 (CUT / WRONG_CUT 的時間戳；沒有則 END − 0.70 秒，`eeg_settings.prediction_log_offset_s`)。`A=` / `B=` 是 Unity 投票的複製：該模型 AT 之前最近 100 筆預測，權重由舊到新 1 到 5，`count1 >= total/2` 則為 1；預測不足 2 筆為 `NA`。`LIVE=` 是投票當下實際送預測給 Unity 的模型。
+- `WRONG_CUT` 要重新編譯 `unity_noVR` 才會出現 (`TimeLogger.cs` 的 `LogType.WrongCut`、`AutoSaber.cs` 兩個 `wrong_hit += 1` 處)。`unity/` (VR 版) 沒有改。
+
+**計分 (Unity 式，`trial_scoring.score_block`)**
+- 投票時間 = CUT / WRONG_CUT 的時間戳 (沒有則 END − 0.70 秒)。
+- 當時送預測的模型：CUT = 對，WRONG_CUT 或沒有 CUT = 錯 (Unity 的真實結果)。
+- 另一個模型：在同一個時間點重算 Unity 的最後 100 筆加權投票，與 label 比對。
+- 整個 trial 的多數決不再線上計算；所有預測存在 `run{N}/predictions.csv` (model, time, pred, prob1)，可事後重算。
+
+**觸發與微調 gate (每 `trial_train_interval` = 4 個 trial)**
+
+```text
+Python 在第 4、8、12… 個 trial (編號 3、7、11…) 的 END 行寫入 log 之後，舉起與 Unity 的 calibration_start 相同的旗標
+  條件：該 run 的 START 行有 MODE 且 (MODE=Adaptive 或本 run 是 Calibration 歌曲，即收到過 Calibration stage 訊息；Unity 之後會立刻送 MI，所以用 `global_value.is_calibration_run` 旗標，不看 stage 字串)；此時忽略 Unity 自己送的 calibration_start / "Don't update model"
+  舊版 Unity (START 沒有 MODE)：照舊，跟著 Unity 的 calibration_start
+main loop 每 1 秒檢查一次旗標：
+  1. saveDataAsPtFromPointer()：把新 trial 存成 data_*.pt (多存 trial_ids)
+  2. ft_pipeline.run_calibration()
+       a. 計分 (微調之前)                                                -> trial_scoring.score_block
+       b. 決定 live 模型 (固定 A / B，或 auto 的連續 block 規則)          -> EEG_Train._decide_live
+       c. 每個模型的 gate：本 block 至少錯 1 個 trial 且本 run 累計正確率 < finetune_acc_threshold (0.75)
+       d. A、B 各一條執行緒：block 的 window 一定先加入自己的 ReplayBuffer；gate 打開才微調並存成新的 cX_NNN
+       e. 寫入 run{N}/ab_blocks.csv，廣播 "calibration done"
+  3. game.dump_predictions()：整份重寫 run{N}/predictions.csv (每個 block 都存，Ctrl+C 也不會全部遺失；進 Training 與回 Lobby 時也存)
+  4. game.swap_in_new_models()：沒有任何模型被微調且 live 模型沒變就略過 (不等、不 reload、swap_time 留空)；否則等 vote flag 關閉 (Unity 不在快要投票的時間窗) 後才 reload_predictors
+平常：A、B 兩個 predictor 執行緒同時讀同一份 EEG buffer，各自記錄預測 (時間、預測、機率)；只有 live 的送給 Unity
+```
+
+- 每個 run 的累計正確數 (每個模型一份) 在 `global_value.runCount` 改變時重設；`finetune_acc_threshold` 在 `online_adaptation` 設定。
+
+**SPRT 微調 gate (`online_adaptation.finetune_gate = "sprt"`，預設)**
+
+上面的 block gate 改成 `"block"` 就會完全照舊。`"sprt"` 時 (只在 START 有 MODE 的新版 Unity；舊版 Unity / VR 專案照舊走 block 路徑)：
+
+```text
+每個 trial 的 END 之後 (Adaptive 或 Calibration 歌曲) -> main loop -> SprtTicker.tick (python/main/EEG/sprt_finetune.py)
+  1. 用自己的 log pointer 讀新結束的 trial，score_block 計分 (live 用 Unity 的 CUT / WRONG_CUT，另一個用重算的投票)
+  2. A、B 各一個 SprtGate (python/main/Utils/sprt_gate.py)：對 +ln(p1/p0)，錯 +ln((1-p1)/(1-p0))
+       分數 <= ln(beta/(1-alpha)) -> 立刻微調這個模型；分數 >= ln((1-beta)/alpha) -> 夠好，不微調；兩種都歸零繼續
+     每個 trial 寫一行 run{N}/sprt_trials.csv (trial, model, live, correct, step, score, decision, p0, p1, alpha, beta)
+  3. 有模型要微調、或 4-trial block 結束：存上次存檔之後的 trial，run_calibration (兩個 buffer 都加入；只微調要微調的模型)
+     ab_blocks.csv 多 trigger (sprt = 中途微調，block = block 結束)、sprt_A、sprt_B 欄
+```
+- 分數在每個 run 開始、以及該模型微調完成後歸零；新權重載入之前投票的 trial 記為 `stale`，不算進新模型。
+- live 模型切換 (`--live_model auto`) 仍然只在 4-trial block 結束時，用這 4 個 trial 的分數判斷。
+- 參數 `sprt_p0` / `sprt_p1` / `sprt_alpha` / `sprt_beta` (預設 0.65 / 0.85 / 0.05 / 0.2)：對 +0.268、錯 −0.847；分數從 0 開始時，2 個 trial 連錯就微調、11 個連對判定夠好；正確率約 76% 時分數不會往任何一邊走。選 76% 是因為 F2 反事實分析：run 正確率低於 0.75 時微調平均 +2.6 pp，0.80 以上約 0 (2026-11-17 之前是 0.5 / 0.75，約 63%，微調太少)。收集資料後要重新檢查 (`docs/known_issues.md` M5)。
+- 離線比較：`python/analysis/sprt_gate_replay.py` (輸出 `python/analysis/results/sprt_gate_replay/`)。
+- **失敗權重 (每個模型各自)**：失敗的 trial 在訓練與驗證 loss 裡權重 ×2。`success_cut_count` (`game_settings`，新 log 為 1，舊資料為 5)：有 WRONG_CUT 或 CUT 數不足就是失敗。當時送預測的模型沿用 Unity 的結果，另一個模型的失敗 = 它重算的投票是錯的。`data_process_np.py`、`else/preprocessing/create_MInp.py` 規則相同。
+
+**Replay Buffer 與訓練分開**
+- `MI_train.ReplayBuffer`，每個模型一個 (`_ModelSlot.buffer`)：`add(dataset)` (FIFO)、`train_set()`、`val_set()`、`sizes()`。`OnlineCalibrationTrainer.train(train_set, val_set)` 只負責訓練 (4 epoch、batch 8、Adam 2 × lr、加權 CE、驗證 loss 最低的 epoch 存成 `{tag}-best.pth`)。
+- 已移除 `global_value.replay_buffer`，離線模擬腳本 `else/pretraining/phase2_calibration_sim.py` 已刪除 (git 歷史可找回)。
+- 建立於 Python 啟動時、跨 run 保留在記憶體、**不寫入磁碟**，重開 Python 後為空。每個 buffer 只被自己的微調執行緒使用，不需要 lock。
+
+**模型換入時機 (vote flag)**
+- vote flag 從 START + (投票 offset − `swap_guard_s`) 開啟，CUT / WRONG_CUT 到達 (或 END，保險) 時關閉；新權重只在 flag 關閉時載入，等待有 3 秒上限。
+- 投票 offset：run 的第一個 trial 用 `vote_offset_s` (4.25)，之後用該 run 實測的 START 到投票秒數 (換歌曲也會自動適應)。
+- 實際送預測的模型 (`global_value.broadcast_model`) 只在 `reload_predictors` 套用 live 旗標時改變，每個 trial 投票當下的值記在 `global_value.trial_live`，計分以它為準。
+- `ab_blocks.csv`：原有欄位位置不變，新增 `ft_A, ft_B` (該 block 是否微調)、`ft_seconds` (本 block 微調所花時間)、`swap_time` (新權重載入時間)。
+
+**Checkpoint 位置與起點 (`--start_from`)**
+- `python/main/EEG/checkpoint_main/` 保留起始模型 (`cA_000`、`cB_000`、`model.pth`)，Unity 大廳仍列出這裡的模型。
+- 微調後的 `cA_NNN` / `cB_NNN` 存到 `real_time_data/sub{S}/ses{N}/checkpoints/`，第一個檔案是 `001`；編號一律取「現有最大編號 + 1」，最大的永遠是最新的 (刪掉中間的檔案也不會被補回)。
+- `--start_from session|base|subject` (預設 `session`)：`session` = 這個 session 最新的，沒有就用 base；`base` = 永遠從 `cA_000` / `cB_000` 開始；`subject` = 這個受試者編號最大、有 checkpoint 的 session 的最新一個。A、B 分開決定 (例如 `cA_009` 與 `cB_012`)，與 `--live_model`、`--start_model` 無關。**注意**：`subject` 時 A、B 各自往前找，所以可能來自不同 session (例如 A 來自 ses2、B 來自 ses1，A、B 各自 gate 時很正常)；這是預期行為。啟動時 `setup_args` 會印出 A、B 各自的來源資料夾，來自不同資料夾時多印一行 WARNING。
+
+**live 模型選擇 (`--live_model`)**
+- `A` / `B`：固定。
+- `auto`：最初由 `--start_model` (預設 A) 控制。每個 block 以上面的 Unity 式計分算 trial accuracy；**另一個模型連續 `switch_streak` 個 block 的 trial accuracy 嚴格較高**才切換，平手或較低則重新計數。
+- `switch_streak` 在 `python/config.json` 的 `online_adaptation` 設定 (預設 2，最小 1)。4 個 trial 的 accuracy 只有 0 / 25 / 50 / 75 / 100%，兩個接近隨機的模型仍有約 13% 的 block 配對會造成切換。
+
+**Replay Buffer 容量 (可保存的 calibration 資料)**
+- 每個類別最多 `replay_buffer_limit` = **384 個 window** (`config.json` 的 `eeg_settings`；程式內建預設為 320)；超過時丟掉最舊的 (被擠出的 window 會進驗證部分；驗證部分也會收納新進的 window，上限為 40% = 153 個 window / 類別)。
+- 流程：`data_*.pt` 存每個 trial 的前 2000 點 (4 秒)、label、failure、trial_ids → 每個模型取自己的通道 → 每個 trial 切成 16 個 window (500 點、stride 100)，去通道均值並帶通 → 4 個 trial 的 block 有 64 個 window。384 = 24 trial × 16 window，約容納一個 run (48 trial，每類 24 個)。
+- 記憶體：滿的時候 A 約 47 MB、B 約 69 MB。預測紀錄每個模型保留最近 60000 筆 (約 11 分鐘)。
+
+**啟動順序與警告 (Python / `game.exe`)**
+- 先啟動 Python，看到 `歡迎來到遊戲大廳！` 之後再開 `game.exe`。Unity 會每 1 秒重試連線，右上角標籤顯示 `Python: connected` (綠) / `Python: not connected` (紅)；連線前送出的訊息 (最多 50 則) 會在連上後依序補送。
+- `WARNING: Waiting for Unity connection`：Python 已連上 LSL (`Connected to LSL stream` 之後開始檢查)，但 3 秒內沒有任何 Unity 連線，之後每 5 秒重複，直到連上。
+- `WARNING: Connection to unity lost`：Unity 曾連上、現在沒有連線 (例如關閉 `game.exe`，或換場景時舊連線被關閉)，每 5 秒重複；Unity 重連後警告停止。
+- `WARNING: Trial data received in Lobby (Unity stage message lost); not used for training`：Python 還在 Lobby 狀態卻收到 trial 訓練旗標 (Unity 的 stage 訊息遺失)。這些 trial 不會被拿去訓練；進入 Calibration / MI 時 Python 也會把 LOG pointer 移到檔尾，並印出略過的 trial 行數。資料仍留在該 run 的 log / CSV。
+- 已知問題：歌曲進行中 Unity 斷線時沒有斷線面板，只有右上角標籤變紅。
+
+**測試與注意事項**
+- 測試：`python python/tests/test_parallel_finetune.py` (不需要 Unity 與腦波帽)。
+- 同一個 trigger 沒有新資料時 (例如 log 行數不足) 不會重複訓練舊資料，但仍會廣播 `calibration done`。
+- 某一條微調執行緒失敗時另一個模型照常完成，失敗的模型維持舊 checkpoint，並記錄在 `ab_blocks.csv` 的 `failed` 欄位。
+- 已知但未處理的問題：auto 切換在 4-trial block 上很吵；訓練只用每個 trial 前 4 秒；重開 Python 後 buffer 為空；驗證資料大多是訓練資料；微調時間 (最長約 8 到 9 秒) 只量測不縮短；main loop 每秒輪詢一次；TCP 訊息沒有 framing；Static run 不計分。
+- GPU：RTX 50 系列 (Blackwell) 需要 PyTorch 2.7 以上 (CUDA 12.8)；上面固定的 `torch==2.3.0+cu121` 不支援。升級後 `torch.load` 預設 `weights_only=True`，載入含 numpy 的 `.pt` 需加上 `weights_only=False`。
 
 
 > 在 `python/else` 資料夾的部分（離線分析、模型訓練與特徵管線）

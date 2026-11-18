@@ -17,7 +17,7 @@ MonoBehaviour:
   info_name: Info.dat
   dir: run1
   file_names:
-  - MI_ExpertStandard_augmented_65s_new.dat
+  - MI_ExpertStandard_augmented_65s_new_48.dat
   - ExpertStandard.dat
   - HardStandard.dat
   - EasyStandard.dat

@@ -81,7 +81,9 @@ public class Song_UI_shower : MonoBehaviour
 
         SSM.reset_fill_position(); // reset level fill
         // 設定右側的內容
-        if (!is_first) SSM.targetImage.sprite = targetImage.sprite;
+        //if (!is_first) SSM.targetImage.sprite = targetImage.sprite;
+        SSM.targetImage.sprite = targetImage.sprite;
+                
         SSM.title.text = song.name;
         SSM.sub_title.text = song.description;
         SSM.levelData.level = "MI"; // 預設第一個選項

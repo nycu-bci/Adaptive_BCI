@@ -55,7 +55,7 @@ def merge_all_subjects_to_grid():
         "51", "52", "54", "55", "57", "58", "63", "64", "65", "68", "69", "70"
     ]
     sessions = ["s1", "s2"]
-    is_13 = False  # False: 22 通道, True: 13 通道
+    is_13 = True  # False: 22 通道, True: 13 通道
     runs = [f"run{i}" for i in range(1, 8)]
     classes = [0, 1]
 

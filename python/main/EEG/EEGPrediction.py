@@ -20,12 +20,15 @@ import main.Utils.global_value as global_value
 
 
 class EEGPredictor:  # 調整模型需要改 self.model，和 self.load_fun 方法
-    def __init__(self, tcp_server):  # old: lsl_outlet=None
+    def __init__(self, tcp_server, name="A", live=True):  # old: lsl_outlet=None
+        self.name = name  # "A" / "B"：兩個模型各一個 predictor；只有 live 的會把預測送給 Unity
+        self.live = live
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.load_check_point_path = config.TRAINED_CHECKPOINT
-        self.load_check_point_path = global_value.NOW_TRAINED_CHECKPOINT
+        self.load_check_point_path = getattr(global_value, f"{name}_CHECKPOINT")
         self.model_class = config.USE_MODEL
         self.model_arg = config.LOAD_MODEL_PARAM
+        self.channel_pos = list(range(config.N_CHANNELS))
         self.model = self.init_model()
         self.predict_eeg_stop_event = threading.Event()
         self.predict_eeg_thread = None
@@ -55,24 +58,22 @@ class EEGPredictor:  # 調整模型需要改 self.model，和 self.load_fun 方�
 
     def init_model(self):
         # ======== Model Setup ============
-        model = self.model_class(**self.model_arg).to(self.device)  # n channel, sample, n class
-        try:
-            if not os.path.exists(self.load_check_point_path):
-                raise FileNotFoundError(f"Checkpoint 不存在: {self.load_check_point_path}")
-            checkpoint = torch.load(self.load_check_point_path, map_location=self.device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-        except Exception as e:
-            print(f"⚠️ [WARNING] 載入模型權重失敗 ({e})。偵測到通道數或維度不匹配。")
-            print(f"👉 自動依據目前設定 ({config.N_CHANNELS} 通道) 為 {self.model_class.__name__} 生成匹配之隨機初始權重...")
+        if not os.path.exists(self.load_check_point_path):  # 只有檔案不存在才產生隨機權重；維度不匹配會直接報錯，不再覆蓋檔案
+            print(f"⚠️ [WARNING] Checkpoint 不存在: {self.load_check_point_path}")
+            print(f"👉 依目前設定 ({config.N_CHANNELS} 通道) 為 {self.model_class.__name__} 生成隨機初始權重...")
             from main.EEG.generate_random_models import create_matching_random_checkpoint
-            checkpoint = create_matching_random_checkpoint(
+            create_matching_random_checkpoint(
                 target_path=self.load_check_point_path,
                 model_class=self.model_class,
                 n_chans=config.N_CHANNELS,
                 n_outputs=config.N_Class,
                 n_times=config.SAMPLE_RATE
             )
-            model.load_state_dict(checkpoint['model_state_dict'])
+        checkpoint = torch.load(self.load_check_point_path, map_location=self.device, weights_only=False)
+        n_chans = int(checkpoint.get('n_chans', config.N_CHANNELS))  # 例如預訓練 A 是 22 通道，從 32 通道 buffer 取子集
+        self.channel_pos = config.channel_positions(n_chans)
+        model = self.model_class(**dict(self.model_arg, channels=n_chans)).to(self.device)
+        model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         return model
 
@@ -110,7 +111,7 @@ class EEGPredictor:  # 調整模型需要改 self.model，和 self.load_fun 方�
                 # input_data = preprocess.down_sample(preprocess.bandpass(eeg_buffer[:, -BUFFER_SIZE:].copy()))
                 # indices = [5, 6, 7, 10, 11, 12, 15, 16, 17, 19, 20, 21, 25, 26, 27]  # 需要選擇的 channel
                 # data = global_value.eeg_buffer[indices, :].copy()  # shape (15, N)
-                data = preprocess.bandpass(global_value.eeg_buffer[:, -config.BUFFER_SIZE:], axis=-1)  # shape (15, 500)
+                data = preprocess.bandpass(global_value.eeg_buffer[self.channel_pos, -config.BUFFER_SIZE:], axis=-1)  # shape (15, 500)
                 input_data = data - np.mean(data, axis=0, keepdims=True)
                 x_batch = torch.from_numpy(input_data.copy()).float().unsqueeze(0).to(self.device)
                 # print(f"shape: {x_batch.shape}") # (1,15,500) (trial, channel, sample)
@@ -132,11 +133,14 @@ class EEGPredictor:  # 調整模型需要改 self.model，和 self.load_fun 方�
 
                         # print(outputs)
                         prediction = int(torch.argmax(outputs).cpu().item())
+                        with global_value.prediction_log_lock:
+                            global_value.prediction_logs[self.name].append(
+                                (time.time(), prediction, float(torch.softmax(outputs.flatten(), 0)[1])))
                         # print(f"Prediction: {prediction}")
                         # print(f"outputs: {outputs}")
                         # self.outlet.push_sample([prediction])
-                        # 推送到 TCP
-                        if self.tcp_server:
+                        # 推送到 TCP（只有 live 的模型）
+                        if self.tcp_server and self.live:
                             self.tcp_server.broadcast(f"{prediction}")
 
                         if config.verbose:  # 每5秒輸出一次統計

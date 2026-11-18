@@ -45,20 +45,29 @@ class EEGReader():
         Continuously pull samples from inlet and append to eeg_buffer.
         Optionally write each sample + timestamp + marker to CSV.
         """
-        self.build_csv_file()
-
+        self.csv_file, self.csv_writer = None, None  # 上一次 run 留下的已關閉檔案，避免誤用
         first_ts_lsl, ts, ts_lsl = None, None, None
         count = 0.000
         inlet = None
+        time_correction = 0.0
         latency_values = []
         if not self.is_simulated:
+            # 先連線再建 CSV，Record datetime 才能對齊第一筆 sample (Timestamp 0)，而不是 resolve 之前的時間
             try:
                 inlet = LSL.setup_lsl_inlet(config.RECEIVE_CYGNUS_LSL_STREAM, timeout=2.0)
+                inlet.open_stream(timeout=5.0)
             except RuntimeError as e:
                 print(f"⚠️ [警告] 無法解析 LSL 腦波串流: {e}")
                 print("👉 自動切換為「模擬隨機腦波 (Simulated EEG)」模式運行，確保測試流程不中斷！")
                 print("💡 提示: 若欲手動指定模式，可在 python/config.json 將 is_simulated_eeg 設為 true。")
                 self.is_simulated = True
+            else:
+                try:
+                    time_correction = inlet.time_correction(timeout=2.0)  # 遠端 LSL clock -> 本機 LSL clock
+                except RuntimeError as e:
+                    print(f"{config.TAGS.WARNING.value} LSL time_correction failed ({e}); using 0.0")
+        if self.is_simulated:
+            self.build_csv_file(time.time())
         while not self.read_eeg_stop_event.is_set():
             if self.is_simulated:
                 data = np.random.randint(-10001, 10001, size=(config.EEG_CHANNELS, 1)).reshape(-1)
@@ -79,6 +88,12 @@ class EEGReader():
 
                 if first_ts_lsl is None:
                     first_ts_lsl = ts
+                    # 第一筆 sample 的 Unix 時間，兩個 clock 連續讀取；CSV 在這裡才建立
+                    fsample_ts = first_ts_lsl + time_correction + (time.time() - local_clock())
+                    print(f"{config.TAGS.INFO.value} First EEG sample: fsample_ts={fsample_ts:.6f}, "
+                          f"time_correction={time_correction * 1000:.3f} ms, "
+                          f"arrival delay={(time.time() - fsample_ts) * 1000:.1f} ms")
+                    self.build_csv_file(fsample_ts)
                 if sample is None:
                     continue
                 data = np.array(sample).reshape(-1)  # 不加入這個會顯示 [float]，而不是 float，用這個寫入文件
@@ -118,13 +133,14 @@ class EEGReader():
                 latency_values.clear()
         self.close_csv_file()  # end to close csv file
 
-    def build_csv_file(self):
+    def build_csv_file(self, record_ts):
+        """record_ts: Unix time (s) of Timestamp 0 (the first sample), written as Record datetime."""
         if self.save_csv:
             self.csv_file = open(self.filename, "w", newline="")
             self.csv_writer = csv.writer(self.csv_file)
             self.csv_writer.writerow([f"Simulating Cygnus version: 0.28.0.7,File version: 2021.11"])
             self.csv_writer.writerow([f"Operative system: Windows"])
-            self.csv_writer.writerow([f"Record datetime: {datetime.now()}"])
+            self.csv_writer.writerow([f"Record datetime: {datetime.fromtimestamp(record_ts).strftime('%Y-%m-%d %H:%M:%S.%f')}"])
             self.csv_writer.writerow([f"Simulating Device ID: STEEG_DG329018"])
             self.csv_writer.writerow([f"Device verison: "])
             self.csv_writer.writerow([f"Device bandwidth: DC to 131 Hz"])

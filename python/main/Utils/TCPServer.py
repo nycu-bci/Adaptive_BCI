@@ -1,5 +1,17 @@
 import socket
 import threading
+import time
+
+_server = None  # 目前的 TCPServer (供 LSL 連上後啟動 watchdog)
+_lsl_connected = False
+
+
+def on_lsl_connected():
+    """LSL 連上後呼叫：啟動 Unity 連線 watchdog (每個 process 一次)"""
+    global _lsl_connected
+    _lsl_connected = True
+    if _server is not None:
+        _server.start_watchdog()
 
 
 class TCPServer:
@@ -14,12 +26,41 @@ class TCPServer:
         self.stop_event = threading.Event()
         self.server_socket = None
         self.thread = None
+        self.ever_connected = False
+        self.watchdog_thread = None
 
     def start(self):
+        global _server
+        _server = self
         self.stop_event.clear()
         self.thread = threading.Thread(target=self._run_server, daemon=True)
         self.thread.start()
         print(f"🚀 TCP Server started on {self.host}:{self.port}")
+        if _lsl_connected:
+            self.start_watchdog()
+
+    def start_watchdog(self, check_s=1.0, grace_s=3.0, repeat_s=5.0, log=print):
+        if self.watchdog_thread and self.watchdog_thread.is_alive():
+            return
+        self.watchdog_thread = threading.Thread(
+            target=self._watchdog, args=(check_s, grace_s, repeat_s, log), daemon=True)
+        self.watchdog_thread.start()
+
+    def _watchdog(self, check_s, grace_s, repeat_s, log):
+        no_client_since = None
+        last_warn = None
+        while not self.stop_event.is_set():
+            now = time.monotonic()
+            if self.clients:
+                no_client_since = last_warn = None
+            else:
+                if no_client_since is None:
+                    no_client_since = now
+                if now - no_client_since >= grace_s and (last_warn is None or now - last_warn >= repeat_s):
+                    last_warn = now
+                    what = "Connection to unity lost" if self.ever_connected else "Waiting for Unity connection"
+                    log(f"⚠️ WARNING: {what}")
+            time.sleep(check_s)
 
     def stop(self):
         self.stop_event.set()
@@ -46,6 +87,7 @@ class TCPServer:
     def _handle_client(self, conn, addr):
         print(f"✅ Client connected from {addr}")
         self.clients.append(conn)
+        self.ever_connected = True
         try:
             while not self.stop_event.is_set():
                 data = conn.recv(1024)

@@ -19,7 +19,7 @@ MonoBehaviour:
   info_name: Info.dat
   dir: run2
   file_names:
-  - MI_ExpertPlusStandard_augmented_65s_new.dat
+  - MI_ExpertPlusStandard_augmented_65s_new_48.dat
   - ExpertPlusStandard.dat
   ui_show_names:
   - MI

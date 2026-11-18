@@ -11,7 +11,9 @@ from main.Utils.TCPServer import TCPServer
 from main.Utils.file_pointer_reader import readCsvFromPointer, readLogFromPointer, extractRecordEpoch
 from main.EEG.data_process_np import EEGDataLoader
 from main.EEG.EEG_Train import arrange_by_label
+from main.EEG.sprt_finetune import SprtTicker
 from main.Utils.some_functions import rename_file_with_time
+from main.Utils import trial_scoring
 import torch
 import numpy as np
 import os
@@ -39,9 +41,10 @@ class GameState(ABC):
     def go_to_training(self, game):
         # game.print_and_record_csv_log_table(self.name)
         game.saveDataAsPtFromPointer()  # game.save_data_as_pt()
+        game.dump_predictions()
 
         # 註解下面，因為後續加入睜眼閉眼任務各 10 秒，然後同步訓練任務，這邊註解，訓練需要加入 go_to_lobby
-        game.eeg_predictor.end_predict_eeg_thread()
+        game.end_predictors()
         # game.eeg_reader.end_read_eeg_thread()
         # game.unity_reader.stop_and_save_log()
 
@@ -52,10 +55,11 @@ class GameState(ABC):
         # game.print_and_record_csv_log_table(self.name)
         if stop_predict:
             game.saveDataAsPtFromPointer()  # game.save_data_as_pt()
-            game.eeg_predictor.end_predict_eeg_thread()
+            game.end_predictors()
 
         game.eeg_reader.end_read_eeg_thread()
         game.unity_reader.stop_and_save_log()
+        game.dump_predictions()
 
         print(f"\n{config.TAGS.INFO.value} 現在返回 Lobby。")
         game.change_state(LobbyState())
@@ -71,22 +75,25 @@ class LobbyState(GameState):
 
     def start(self, game):
         global_value.runCount += 1
+        global_value.reset_run_state()
         print(f"\n{config.TAGS.INFO.value} [DEBUG] 目前 Run 編號: {global_value.runCount}")
         game.resetFilePointers()  # 新 run 重設 pointer
-        game.eeg_predictor.update_check_point(global_value.NOW_TRAINED_CHECKPOINT)  # default c_000
-        game.eeg_predictor.update_model()
+        game.reload_predictors()
         game.eeg_reader.start_read_eeg_thread()
         game.eeg_predictor.start_predict_eeg_thread()
+        game.eeg_predictor_b.start_predict_eeg_thread()
         game.unity_reader.start_write_log()
         print(f"\n{config.TAGS.INFO.value} 歡迎來到遊戲大廳！")
 
     def update(self, game):
         # select model
         if global_value.update_model:
-            game.eeg_predictor.update_check_point(global_value.unity_update_model_str)
-            game.eeg_predictor.update_model()
-            global_value.NOW_TRAINED_CHECKPOINT = global_value.unity_update_model_str
+            global_value.A_CHECKPOINT = global_value.unity_update_model_str  # 手動選的模型是 A 的新起點
+            game.reload_predictors()
             global_value.update_model = False
+        if global_value.unity_marker_string_calibration == config.RECEIVE_UNITY_CALIBRATION_START_STR:
+            print(f"{config.TAGS.WARNING.value} Trial data received in Lobby (Unity stage message lost); not used for training")
+            global_value.unity_marker_string_calibration = ""
         if global_value.unity_marker_string_stage == config.GameSTATE.Calibration.value:
             game.change_state(CalibrationState())
         elif global_value.unity_marker_string_stage == config.GameSTATE.BeatSaber.value:
@@ -127,22 +134,25 @@ class CalibrationState(GameState):
 
     def start(self, game):
         print(f"\n{config.TAGS.INFO.value} 你進入了 CalibrationState")
+        game.skipLogToEnd()
         game.ft_pipeline.init_pipeline()
 
     def update(self, game):  # 需要加入一些文字 list
         # 20260226 改用 pointer-based 讀取，不再關閉/重建檔案，檔案只在回到 Lobby 時才關閉
         if global_value.unity_marker_string_calibration == config.RECEIVE_UNITY_CALIBRATION_START_STR:
-            print(f"\n{config.TAGS.INFO.value} 開始 online Calibration (pointer-based)")
             global_value.unity_marker_string_calibration = ""  # 清空字串
+            if config.FINETUNE_GATE == "sprt" and global_value.run_mode:  # 舊版 Unity (沒有 MODE) 等 calibration done，照舊
+                game.sprt_ticker.tick(game)
+            else:
+                print(f"\n{config.TAGS.INFO.value} 開始 online Calibration (pointer-based)")
+                # 使用 pointer-based 讀取，只讀取新增的 CSV/LOG 資料
+                game.saveDataAsPtFromPointer()
 
-            # 使用 pointer-based 讀取，只讀取新增的 CSV/LOG 資料
-            game.saveDataAsPtFromPointer()
+                game.ft_pipeline.run_calibration()
+                game.dump_predictions()
 
-            game.ft_pipeline.run_calibration()
-
-            # game.eeg_predictor.end_predict_eeg_thread()
-            game.eeg_predictor.update_check_point(global_value.NOW_TRAINED_CHECKPOINT)  # default c_000
-            game.eeg_predictor.update_model()
+                # game.eeg_predictor.end_predict_eeg_thread()
+                game.swap_in_new_models()
 
         if global_value.unity_marker_string_stage == config.GameSTATE.TRAIN.value:
             self.go_to_training(game)
@@ -177,6 +187,7 @@ class MIState(GameState):
 
     def start(self, game):
         print(f"\n{config.TAGS.INFO.value} 你進入了 MIState")
+        game.skipLogToEnd()
         game.ft_pipeline.init_pipeline()
 
     def update(self, game):
@@ -185,17 +196,19 @@ class MIState(GameState):
         if global_value.unity_marker_string_stage == config.GameSTATE.TRAIN.value:  # 訓練的部分改掉，改成下面這種方式， trial 式的訓練
             self.go_to_training(game)
         if global_value.unity_marker_string_calibration == config.RECEIVE_UNITY_CALIBRATION_START_STR:
-            print(f"\n{config.TAGS.INFO.value} 開始 online Calibration (pointer-based)")
             global_value.unity_marker_string_calibration = ""  # 清空字串
+            if config.FINETUNE_GATE == "sprt" and global_value.run_mode:  # 舊版 Unity (沒有 MODE) 等 calibration done，照舊
+                game.sprt_ticker.tick(game)
+            else:
+                print(f"\n{config.TAGS.INFO.value} 開始 online Calibration (pointer-based)")
+                # 使用 pointer-based 讀取，只讀取新增的 CSV/LOG 資料
+                game.saveDataAsPtFromPointer()
 
-            # 使用 pointer-based 讀取，只讀取新增的 CSV/LOG 資料
-            game.saveDataAsPtFromPointer()
+                game.ft_pipeline.run_calibration()
+                game.dump_predictions()
 
-            game.ft_pipeline.run_calibration()
-
-            # game.eeg_predictor.end_predict_eeg_thread()
-            game.eeg_predictor.update_check_point(global_value.NOW_TRAINED_CHECKPOINT)  # default c_000
-            game.eeg_predictor.update_model()
+                # game.eeg_predictor.end_predict_eeg_thread()
+                game.swap_in_new_models()
 
 
 class Game:
@@ -210,9 +223,12 @@ class Game:
 
         self.unity_reader.setup_tcp_server(tcp_server)
 
-        self.eeg_predictor = EEGPredictor(tcp_server=tcp_server)  # csv
+        self.eeg_predictor = EEGPredictor(tcp_server=tcp_server, name="A", live=global_value.live_model == "A")  # csv
+        self.eeg_predictor_b = EEGPredictor(tcp_server=tcp_server, name="B", live=global_value.live_model == "B")
+        global_value.broadcast_model = global_value.live_model
 
         self.ft_pipeline = EEGFineTunePipeline(tcp_server=tcp_server)
+        self.sprt_ticker = SprtTicker()  # finetune_gate = "sprt" 時每個 trial 用
         self.train_pipeline = EEGTrainingPipeline(tcp_server=tcp_server)
         self.pre_state = ""
         # ---- Pointer-based 檔案讀取指標 ----
@@ -220,6 +236,39 @@ class Game:
         self.logLinePointer = 0  # LOG 已讀行數
         self.set_global_model_name()
         self.state = LobbyState()
+
+    def reload_predictors(self):
+        """兩個 predictor 各載入自己最新的 checkpoint，並依 live_model 設定誰把預測送給 Unity"""
+        for predictor in (self.eeg_predictor, self.eeg_predictor_b):
+            predictor.update_check_point(getattr(global_value, f"{predictor.name}_CHECKPOINT"))
+            predictor.live = predictor.name == global_value.live_model
+            predictor.update_model()
+        global_value.broadcast_model = global_value.live_model  # 之後的投票由這個模型送出
+        global_value.NOW_TRAINED_CHECKPOINT = getattr(global_value, f"{global_value.live_model}_CHECKPOINT")
+
+    def swap_in_new_models(self):
+        """微調完成後載入新權重：Unity 快要投票時 (vote flag 開著) 先等，避免一次投票混用新舊權重；沒有任何變動就略過"""
+        if not self.ft_pipeline.models_changed:
+            print(f"{config.TAGS.INFO.value} 本 block 沒有模型更新，略過載入新權重")
+            return
+        if not trial_scoring.wait_vote_flag_off():
+            print(f"{config.TAGS.WARNING.value} vote flag 逾時未關閉，仍載入新權重")
+        swap_time = time.time()
+        global_value.last_swap_time = swap_time
+        self.reload_predictors()
+        self.ft_pipeline.record_swap(swap_time)
+
+    @staticmethod
+    def dump_predictions():
+        """把本 run 到目前為止的預測寫成 predictions.csv (每個 block 與 run 結束時各寫一次，整份重寫)"""
+        try:
+            trial_scoring.dump_predictions()
+        except Exception as e:
+            print(f"{config.TAGS.WARNING.value} predictions.csv 寫入失敗: {e}")
+
+    def end_predictors(self):
+        self.eeg_predictor.end_predict_eeg_thread()
+        self.eeg_predictor_b.end_predict_eeg_thread()
 
     def change_state(self, new_state):
         self.set_global_model_name()
@@ -260,6 +309,24 @@ class Game:
         self.logLinePointer = 0
         print(f"{config.TAGS.INFO.value} [DEBUG] resetFilePointers: pointer 已重設為 0")
 
+    def skipLogToEnd(self):
+        """進入 Calibration/MI 時，把 LOG pointer 移到目前檔尾：Lobby 期間記錄的 trial 不會被讀進訓練 block"""
+        self.unity_reader.flushLog()
+        skipped = 0
+        count = 0
+        try:
+            with open(self.unity_reader.filename, 'r', encoding='utf-8', errors='ignore') as f:
+                for i, line in enumerate(f):
+                    count = i + 1
+                    if i >= self.logLinePointer and line.lstrip().startswith("Trial"):
+                        skipped += 1
+        except OSError as e:
+            print(f"{config.TAGS.WARNING.value} skipLogToEnd: 無法讀取 LOG: {e}")
+            return
+        self.logLinePointer = max(self.logLinePointer, count)
+        if skipped > 0:
+            print(f"{config.TAGS.WARNING.value} 略過 Lobby 期間記錄的 {skipped} 行 trial 資料 (不用於訓練)")
+
     def saveDataAsPtFromPointer(self):
         """
         使用 pointer-based 方式讀取 CSV/LOG 的新增資料，
@@ -280,9 +347,13 @@ class Game:
         trials, newLogPointer, newLogLineCount = readLogFromPointer(
             logPath, self.logLinePointer
         )
-        if newLogLineCount < 7:
+        if config.FINETUNE_GATE == "sprt" and global_value.run_mode:  # SPRT 可能只存 1 個 trial (一個 trial 約 3 行)，至少要有一個完整 trial
+            too_short = not any('start' in t and 'end' in t for t in trials.values())
+        else:
+            too_short = newLogLineCount < 7
+        if too_short:
             print(f"{config.TAGS.INFO.value} [DEBUG] saveDataAsPtFromPointer: "
-                  f"新 LOG 行數 {newLogLineCount} < 7，略過儲存")
+                  f"新 LOG 行數 {newLogLineCount}，沒有足夠的完整 trial，略過儲存")
             return
 
         # 3. 使用 pointer 讀取 CSV 新資料
@@ -324,11 +395,13 @@ class Game:
 
         # 6. 轉換格式並存為 .pt
         xData, yData, failuresData = loader.get_eeg_trial_channel_sample_np()
+        _, _, trialIds = arrange_by_label(xData, yData, loader.get_trial_ids_np())  # 與 trial 同一個排列，之後才對得上每個 trial 的結果
         xData, yData, failuresData = arrange_by_label(xData, yData, failuresData)
 
         dataName = rename_file_with_time(config.getRunPtFilename())
         global_value.train_np_data.append(dataName)
-        torch.save({'x_data': xData, 'y_data': yData, 'failures': failuresData}, dataName)
+        torch.save({'x_data': xData, 'y_data': yData, 'failures': failuresData, 'trial_ids': trialIds}, dataName)
+        global_value.last_block_trials = trials  # run_calibration 用來替 A/B 兩個模型計分
 
         print(f"{config.TAGS.INFO.value} [DEBUG] saveDataAsPtFromPointer: "
               f"已儲存 {dataName} (segments={len(loader.segments)})")
