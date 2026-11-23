@@ -34,6 +34,7 @@ import json
 import os
 import random
 import re
+import socket
 import sys
 import tempfile
 import time
@@ -466,8 +467,9 @@ def main():
     ap.add_argument(
         "--queue",
         default=None,
-        help="file with one 'sub:ses:condition' per line; several workers (any server, shared --out) take items in "
-        "order, each item claimed once by an atomic mkdir in --out/_claims. Overrides --jobs / --conditions.",
+        help="file with one 'sub:ses:condition[@seeds]' per line; several workers (shared --out) take items in order, "
+        "each item claimed once by an atomic mkdir in --out/_claims, each session bound to one host. "
+        "Overrides --jobs / --conditions.",
     )
     ap.add_argument("--seeds", default="0,1,2,3,4")
     ap.add_argument(
@@ -508,16 +510,32 @@ def main():
     )
 
     if args.queue:
+        # 不同型號的 GPU (4090 / 5090) 同一個 seed 的結果不完全相同：一個 session 的所有條件都在同一台主機上跑，
+        # 條件之間的比較才不混進硬體差異。第一個領到該 session 的主機把它綁定 (_claims/host__<session>)。
+        host = socket.gethostname()
         items = []
         for line in open(args.queue):
             if line.strip() and not line.startswith("#"):
                 sub, ses, cond = line.strip().split(":", 2)
+                cond, _, item_seeds = cond.partition("@")
                 parse_condition(cond)
-                items.append((sub, ses, cond))
+                items.append((sub, ses, cond, [int(s) for s in item_seeds.split(",")] if item_seeds else seeds))
         claims = os.path.join(args.out, "_claims")
         os.makedirs(claims, exist_ok=True)
         cache = {}
-        for sub, ses, cond in items:
+        for sub, ses, cond, item_seeds in items:
+            bind = os.path.join(claims, f"host__{sub}_{ses}")
+            if not os.path.exists(bind):
+                tmp = f"{bind}.{host}.{os.getpid()}"
+                with open(tmp, "w") as f:
+                    f.write(host)
+                try:
+                    os.link(tmp, bind)  # 原子操作：只有一台主機成功
+                except FileExistsError:
+                    pass
+                os.remove(tmp)
+            if open(bind).read().strip() != host:
+                continue
             try:
                 os.mkdir(os.path.join(claims, f"{sub}_{ses}__{cond_name(cond)}"))
             except FileExistsError:
@@ -526,7 +544,7 @@ def main():
                 if len(cache) >= 2:
                     cache.pop(next(iter(cache)))
                 cache[(sub, ses)] = build_session(sub, ses, args.data_dir)
-            run_condition(args, starts, device, sub, ses, cache[(sub, ses)], cond, seeds)
+            run_condition(args, starts, device, sub, ses, cache[(sub, ses)], cond, item_seeds)
         print("queue done", flush=True)
         return
 
