@@ -62,6 +62,11 @@ def main():
             seed=int(seed),
             acc=correct.mean(),
             n_ft=len(up),
+            n_train=(  # oracle：每個 block 都訓練，只採用一部分
+                sum(1 for _ in open(os.path.join(d, "oracle.csv"))) - 1
+                if os.path.exists(os.path.join(d, "oracle.csv"))
+                else len(up)
+            ),
             ft_seconds=sum(float(u["seconds"]) for u in up),
             acc_late=correct[runs >= 5].mean() if (runs >= 5).any() else np.nan,
         )

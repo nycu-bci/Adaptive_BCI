@@ -93,14 +93,6 @@ def main():
     os.makedirs(out, exist_ok=True)
 
     rows = list(csv.DictReader(open(os.path.join(args.sim, "per_session.csv"))))
-    trainings = {}
-    for r in rows:
-        if r["condition"].startswith("oracle"):
-            p = os.path.join(
-                args.sim, f"{r['subject']}_{r['session']}", f"{r['condition']}_seed{r['seed']}", "oracle.csv"
-            )
-            if os.path.exists(p):
-                trainings[(r["subject"], r["session"], r["condition"], r["seed"])] = sum(1 for _ in open(p)) - 1
     # seeds -> session -> subject
     ses = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rows:
