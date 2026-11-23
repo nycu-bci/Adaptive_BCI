@@ -40,7 +40,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", required=True)
     ap.add_argument("--ref", default="block")
+    ap.add_argument("--outdir", default=None, help="where to write the csv / summary (default: --sim)")
     args = ap.parse_args()
+    outdir = args.outdir or args.sim
+    os.makedirs(outdir, exist_ok=True)
 
     per_session, per_ft = [], []
     for d in sorted(glob.glob(os.path.join(args.sim, "*_s[12]", "*_seed*"))):
@@ -94,12 +97,12 @@ def main():
     keys = sorted(
         {k for r in per_session for k in r}, key=lambda k: (not k in ("subject", "session", "condition", "seed"), k)
     )
-    with open(os.path.join(args.sim, "per_session.csv"), "w", newline="") as f:
+    with open(os.path.join(outdir, "per_session.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys)
         w.writeheader()
         w.writerows(per_session)
     if per_ft:
-        with open(os.path.join(args.sim, "per_finetune.csv"), "w", newline="") as f:
+        with open(os.path.join(outdir, "per_finetune.csv"), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(per_ft[0]))
             w.writeheader()
             w.writerows(per_ft)
@@ -167,7 +170,7 @@ def main():
         rs = [r for r in per_session if r["condition"] == c]
         lines.append(f"{c:28s} " + " ".join(f"{np.nanmean([r.get(k, np.nan) for r in rs]):6.3f}" for k in run_keys))
     text = "\n".join(lines)
-    open(os.path.join(args.sim, "summary.txt"), "w", encoding="utf-8").write(text + "\n")
+    open(os.path.join(outdir, "summary.txt"), "w", encoding="utf-8").write(text + "\n")
     print(text)
 
 
