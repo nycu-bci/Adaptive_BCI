@@ -8,7 +8,11 @@ Gates: never | always (every block end) | block[:thr] (EEG_Train._gates: >= 1 wr
        default --threshold = 0.75) | sprt[:p0,p1,alpha,beta] (main/Utils/sprt_gate.py: per trial, finetune at once on the
        lower line) | every:k (after every k-th trial of a run) | random:q (after any trial with probability q, own RNG)
        | oracle[:n] (cheating ceiling: train at every block end, keep the new weights only if they beat the old ones on the
-       next n = 48 trials, else go back to the old weights).
+       next n = 48 trials, else go back to the old weights)
+       | shadow[:k,m] (causal: train at a block end, let the new model vote in the background on the next k trials, then
+       use it only if it got at least m more of them right than the model in use, else go back; one candidate at a time,
+       the next one is trained at the next block end; default k = 8, m = 0)
+       | sprtb[:p0,p1,alpha,beta] (diagnostic: the SPRT decides per trial, but the finetune waits for the block end).
 --delay d: new weights are used from the d-th trial after the next one (online a finetune takes 2.5-14 s, a trial ~6.8 s:
        d = 1-2). The d trials in between are voted by the old model; the SPRT does not score them ("stale", as online),
        and no other finetune starts while one is pending.
@@ -225,6 +229,16 @@ def parse_condition(c):
         return "random", [float(arg)]
     if kind == "oracle":
         return "oracle", [int(arg) if arg else 48]
+    if kind == "shadow":
+        k, m = ([int(v) for v in arg.split(",")] + [0])[:2] if arg else (8, 0)
+        return "shadow", [k, m]
+    if kind == "sprtb":
+        vals = (
+            [float(v) for v in arg.split(",")]
+            if arg
+            else [config.SPRT_P0, config.SPRT_P1, config.SPRT_ALPHA, config.SPRT_BETA]
+        )
+        return "sprtb", vals
     raise ValueError(f"unknown condition {c}")
 
 
@@ -232,7 +246,7 @@ def split_conditions(s):
     """'never,sprt:0.65,0.85,0.05,0.2,block' -> ['never', 'sprt:0.65,0.85,0.05,0.2', 'block']"""
     out = []
     for tok in s.split(","):
-        if out and re.fullmatch(r"[0-9.]+", tok) and out[-1].startswith("sprt:"):
+        if out and re.fullmatch(r"[0-9.]+", tok) and out[-1].split(":")[0] in ("sprt", "sprtb", "shadow") and ":" in out[-1]:
             out[-1] += "," + tok
         else:
             out.append(tok)
@@ -277,12 +291,43 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
     versions_correct, versions_margin = [cur_correct.copy()], [cur_margin.astype(np.float16)]
     version = 0  # matrix 的列號 = 目前在用的模型
     pending = None  # (load_trial, version, correct, margin)：已訓練、還沒換上的權重
-    gate = SprtGate(*vals) if kind == "sprt" else None
+    gate = SprtGate(*vals) if kind in ("sprt", "sprtb") else None
+    deferred = False  # sprtb：SPRT 已判定要微調，等 block 結束
+    shadow = None  # shadow：背景中的候選模型 dict
     trial_rows, update_rows, oracle_rows = [], [], []
     run_correct = run_scored = 0
     block_wrong = 0
     last_added = 0  # 下一個還沒加進 buffer 的 trial
     sim_correct = np.zeros(n_trials, dtype=bool)
+
+    def resolve_shadow(sh, t_now, n_total):
+        """t_now = first trial after the background vote window; returns None (no candidate left)"""
+        nonlocal version, cur_correct, cur_margin, pending
+        w = slice(sh["t"] + 1, min(sh["t_dec"] + 1, n_total))
+        n_next = w.stop - w.start
+        gain = int(sh["correct"][w].sum()) - int(cur_correct[w].sum())
+        accepted = n_next == vals[0] and gain >= vals[1]
+        oracle_rows.append(
+            [sh["t"], run_of[sh["t"]], pos_in_run[sh["t"]], n_next, f"{cur_correct[w].mean() if n_next else np.nan:.4f}",
+             f"{sh['correct'][w].mean() if n_next else np.nan:.4f}", int(accepted), f"{sh['secs']:.3f}"]
+        )
+        if not accepted:
+            model.load_state_dict(sh["parent"])
+            return None
+        versions_correct.append(sh["correct"].copy())
+        versions_margin.append(sh["margin"].astype(np.float16))
+        new_version = len(versions_correct) - 1
+        tr_sizes, val_sizes = sh["sizes"]
+        load_trial = t_now + delay
+        update_rows.append(
+            [new_version, sh["t"], run_of[sh["t"]], pos_in_run[sh["t"]], f"{sh['loss']:.4f}", f"{sh['secs']:.3f}",
+             sum(tr_sizes.values()), sum(val_sizes.values()), load_trial]
+        )
+        if delay == 0:
+            version, cur_correct, cur_margin = new_version, sh["correct"], sh["margin"]
+        else:
+            pending = (load_trial, new_version, sh["correct"], sh["margin"])
+        return None
 
     for t in range(n_trials):
         if pending is not None and t >= pending[0]:  # 新權重從這個 trial 開始用
@@ -290,6 +335,8 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             pending = None
             if gate is not None:
                 gate.reset()
+        if shadow is not None and t == shadow["t_dec"] + 1:  # 候選模型在背景投完 k 個 trial：決定換不換
+            shadow = resolve_shadow(shadow, t, n_trials)
         if pos_in_run[t] == 0:  # 新 run：run 計數與 SPRT 分數歸零
             run_correct = run_scored = 0
             block_wrong = 0
@@ -305,7 +352,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
         u = rng.random()
         decision, score = "", ""
         do_ft = False
-        if adaptive and kind == "sprt":
+        if adaptive and kind in ("sprt", "sprtb"):
             if pending is not None:
                 decision, score = "stale", f"{gate.score:.3f}"
             else:
@@ -313,11 +360,18 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                 score = f"{gate.last_score:.3f}"
                 decision = d or ""
                 do_ft = d == "finetune"
+                if kind == "sprtb":
+                    deferred = deferred or do_ft
+                    do_ft = False
         if adaptive and block_end:
             if kind in ("always", "oracle"):
                 do_ft = True
             elif kind == "block":
                 do_ft = block_wrong >= 1 and run_correct / run_scored < thr
+            elif kind == "sprtb":
+                do_ft, deferred = deferred, False
+            elif kind == "shadow":
+                do_ft = shadow is None
         if adaptive and kind == "every":
             do_ft = (pos_in_run[t] + 1) % vals[0] == 0
         if adaptive and kind == "random":
@@ -345,7 +399,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             buffer.add(to_dataset(W[idx], labels[idx], ~sim_correct[idx]))
             last_added = t + 1
         if do_ft:
-            parent_state = copy.deepcopy(model.state_dict()) if kind == "oracle" else None
+            parent_state = copy.deepcopy(model.state_dict()) if kind in ("oracle", "shadow") else None
             t0 = time.perf_counter()
             seed_all(GLOBAL_SEED + SEED_STEP * seed)  # 線上 _calibrate 每次微調前都重設全域種子
             with contextlib.redirect_stdout(io.StringIO()):
@@ -353,6 +407,10 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             secs = time.perf_counter() - t0
             new_correct, new_margin = vote_all(model, W, labels, device)
             load_trial = t + 1 + delay
+            if kind == "shadow":
+                shadow = dict(t=t, t_dec=t + vals[0], correct=new_correct, margin=new_margin, parent=parent_state, loss=loss,
+                              secs=secs, sizes=buffer.sizes())
+                continue
             if kind == "oracle":
                 w = slice(load_trial, min(load_trial + vals[0], n_trials))
                 n_next = w.stop - w.start
@@ -389,6 +447,8 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                     gate.reset()
             else:
                 pending = (load_trial, new_version, new_correct, new_margin)
+    if shadow is not None:  # session 結束時還在背景的候選：算一次訓練、沒採用
+        shadow = resolve_shadow(shadow, n_trials, n_trials)
     return trial_rows, update_rows, oracle_rows, np.array(versions_correct), np.array(versions_margin)
 
 

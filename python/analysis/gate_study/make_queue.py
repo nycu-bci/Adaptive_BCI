@@ -78,6 +78,10 @@ PHASES = {
             "0,1,2",
         ),
     ],
+    # 探索：背景驗證 (shadow) 才換上新模型；SPRT 延到 block 結束 (診斷)。延遲 0，session 綁定沿用第二輪的主機；5 seeds
+    "round4": [
+        (["shadow:4,0", "shadow:8,0", "shadow:16,0", "shadow:16,1", "sprtb:0.65,0.85,0.05,0.2"], None),
+    ],
 }
 
 if __name__ == "__main__":

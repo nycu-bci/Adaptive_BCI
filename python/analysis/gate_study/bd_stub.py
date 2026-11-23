@@ -22,9 +22,15 @@ def _placeholder_func(pkg_name, name):
     return f
 
 
+def _missing(name):
+    if name in sys.modules:  # 已經裝過 (真的或替身)
+        return False
+    return importlib.util.find_spec(name) is None
+
+
 def install():
     installed = []
-    if importlib.util.find_spec("braindecode") is None:
+    if _missing("braindecode"):
         pkg = types.ModuleType("braindecode")
         models = types.ModuleType("braindecode.models")
         for name in ("ShallowFBCSPNet", "EEGNetv4", "EEGConformer", "ATCNet"):
@@ -33,7 +39,7 @@ def install():
         sys.modules["braindecode"] = pkg
         sys.modules["braindecode.models"] = models
         installed.append("braindecode")
-    if importlib.util.find_spec("pylsl") is None:
+    if _missing("pylsl"):
         lsl = types.ModuleType("pylsl")
         for name in ("StreamInfo", "StreamOutlet", "StreamInlet"):
             setattr(lsl, name, _placeholder("pylsl", name))
