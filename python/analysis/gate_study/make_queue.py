@@ -61,6 +61,23 @@ PHASES = {
             "0,1,2",
         ),
     ],
+    # 穩健性：新權重延遲 2 個 trial 上線 (--delay 2)；含時鐘曲線的點，才能在同樣延遲下算殘差；3 seeds
+    "round3": [
+        (
+            [
+                "never",
+                "block",
+                "always",
+                "every:8",
+                "every:12",
+                "every:20",
+                SPRT_DEFAULT,
+                "sprt:0.5,0.75,0.05,0.2",
+                "sprt:0.6,0.85,0.01,0.4",
+            ],
+            "0,1,2",
+        ),
+    ],
 }
 
 if __name__ == "__main__":
