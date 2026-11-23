@@ -4,8 +4,14 @@ Offline replay of the online finetune loop on the old Cygnus sessions (subjects 
 
 For one session (7 runs x 40 trials, in recorded order) and one gate:
   every trial is voted by the model in use -> correct / wrong -> the gate decides -> maybe finetune -> next trial.
-Gates: never | always (every block end) | block (EEG_Train._gates: >= 1 wrong in the block and run accuracy < 0.75)
-       | sprt:p0,p1,alpha,beta (main/Utils/sprt_gate.py: per trial, finetune at once on the lower line).
+Gates: never | always (every block end) | block[:thr] (EEG_Train._gates: >= 1 wrong in the block and run accuracy < thr,
+       default --threshold = 0.75) | sprt[:p0,p1,alpha,beta] (main/Utils/sprt_gate.py: per trial, finetune at once on the
+       lower line) | every:k (after every k-th trial of a run) | random:q (after any trial with probability q, own RNG)
+       | oracle[:n] (cheating ceiling: train at every block end, keep the new weights only if they beat the old ones on the
+       next n = 48 trials, else go back to the old weights).
+--delay d: new weights are used from the d-th trial after the next one (online a finetune takes 2.5-14 s, a trial ~6.8 s:
+       d = 1-2). The d trials in between are voted by the old model; the SPRT does not score them ("stale", as online),
+       and no other finetune starts while one is pending.
 Training is the online code itself: main/EEG/MI_train.ReplayBuffer + OnlineCalibrationTrainer with python/config.json
 (buffer 384 windows / class, 4 epochs, lr, batch 8, failed trials x2). As online, the trials since the last add go into the
 buffer at every finetune and at every 4-trial block end, whatever the gate; the global RNG is re-seeded before each finetune.
@@ -20,6 +26,7 @@ Outputs in --out/<subject>_<session>/<condition>_seed<k>/: trials.csv, updates.c
 
 import argparse
 import contextlib
+import copy
 import csv
 import glob
 import io
@@ -199,30 +206,54 @@ def to_dataset(W, labels, fails):
 
 
 def parse_condition(c):
-    if c.startswith("sprt"):
+    kind, _, arg = c.partition(":")
+    if kind == "sprt":
         vals = (
-            [float(v) for v in c.split(":")[1].split(",")]
-            if ":" in c
+            [float(v) for v in arg.split(",")]
+            if arg
             else [config.SPRT_P0, config.SPRT_P1, config.SPRT_ALPHA, config.SPRT_BETA]
         )
         return "sprt", vals
-    if c not in ("never", "always", "block"):
-        raise ValueError(f"unknown condition {c}")
-    return c, None
+    if kind in ("never", "always") and not arg:
+        return kind, None
+    if kind == "block":
+        return "block", ([float(arg)] if arg else None)
+    if kind == "every" and arg:
+        return "every", [int(arg)]
+    if kind == "random" and arg:
+        return "random", [float(arg)]
+    if kind == "oracle":
+        return "oracle", [int(arg) if arg else 48]
+    raise ValueError(f"unknown condition {c}")
+
+
+def split_conditions(s):
+    """'never,sprt:0.65,0.85,0.05,0.2,block' -> ['never', 'sprt:0.65,0.85,0.05,0.2', 'block']"""
+    out = []
+    for tok in s.split(","):
+        if out and re.fullmatch(r"[0-9.]+", tok) and out[-1].startswith("sprt:"):
+            out[-1] += "," + tok
+        else:
+            out.append(tok)
+    return out
 
 
 def cond_name(c):
     kind, vals = parse_condition(c)
-    return kind if vals is None else "sprt_" + "_".join(f"{v:g}" for v in vals)
+    if vals is None or (kind == "oracle" and vals == [48]):
+        return kind
+    return kind + "_" + "_".join(f"{v:g}" for v in vals)
 
 
 # ---------------- one simulation ----------------
-def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold):
+def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, delay=0):
     kind, vals = parse_condition(cond)
     W = sess["W"]
     labels = sess["labels"]
     run_of, pos_in_run = sess["run_of"], sess["pos_in_run"]
     n_trials = len(labels)
+    thr = vals[0] if kind == "block" and vals else threshold
+    rng = np.random.default_rng([seed, 20261123])  # 只給 random gate；不受每次微調前的全域種子重設影響
 
     ck = torch.load(start_ckpt, map_location=device, weights_only=False)
     n_chans = int(ck.get("n_chans", W.shape[3]))
@@ -243,15 +274,21 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold):
 
     cur_correct, cur_margin = vote_all(model, W, labels, device)
     versions_correct, versions_margin = [cur_correct.copy()], [cur_margin.astype(np.float16)]
-    version = 0
+    version = 0  # matrix 的列號 = 目前在用的模型
+    pending = None  # (load_trial, version, correct, margin)：已訓練、還沒換上的權重
     gate = SprtGate(*vals) if kind == "sprt" else None
-    trial_rows, update_rows = [], []
+    trial_rows, update_rows, oracle_rows = [], [], []
     run_correct = run_scored = 0
     block_wrong = 0
     last_added = 0  # 下一個還沒加進 buffer 的 trial
     sim_correct = np.zeros(n_trials, dtype=bool)
 
     for t in range(n_trials):
+        if pending is not None and t >= pending[0]:  # 新權重從這個 trial 開始用
+            _, version, cur_correct, cur_margin = pending
+            pending = None
+            if gate is not None:
+                gate.reset()
         if pos_in_run[t] == 0:  # 新 run：run 計數與 SPRT 分數歸零
             run_correct = run_scored = 0
             block_wrong = 0
@@ -264,18 +301,28 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold):
         run_scored += 1
         block_wrong += int(not ok)
         block_end = (pos_in_run[t] + 1) % BLOCK == 0
+        u = rng.random()
         decision, score = "", ""
         do_ft = False
         if adaptive and kind == "sprt":
-            d = gate.update(ok)
-            score = f"{gate.last_score:.3f}"
-            decision = d or ""
-            do_ft = d == "finetune"
+            if pending is not None:
+                decision, score = "stale", f"{gate.score:.3f}"
+            else:
+                d = gate.update(ok)
+                score = f"{gate.last_score:.3f}"
+                decision = d or ""
+                do_ft = d == "finetune"
         if adaptive and block_end:
-            if kind == "always":
+            if kind in ("always", "oracle"):
                 do_ft = True
             elif kind == "block":
-                do_ft = block_wrong >= 1 and run_correct / run_scored < threshold
+                do_ft = block_wrong >= 1 and run_correct / run_scored < thr
+        if adaptive and kind == "every":
+            do_ft = (pos_in_run[t] + 1) % vals[0] == 0
+        if adaptive and kind == "random":
+            do_ft = u < vals[0]
+        if pending is not None:  # 上一次微調還沒換上：不開始新的
+            do_ft = False
         trial_rows.append(
             [
                 run_of[t],
@@ -297,19 +344,34 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold):
             buffer.add(to_dataset(W[idx], labels[idx], ~sim_correct[idx]))
             last_added = t + 1
         if do_ft:
+            parent_state = copy.deepcopy(model.state_dict()) if kind == "oracle" else None
             t0 = time.perf_counter()
             seed_all(GLOBAL_SEED + SEED_STEP * seed)  # 線上 _calibrate 每次微調前都重設全域種子
             with contextlib.redirect_stdout(io.StringIO()):
                 loss = trainer.train(buffer.train_set(), buffer.val_set())
             secs = time.perf_counter() - t0
-            version += 1
-            cur_correct, cur_margin = vote_all(model, W, labels, device)
-            versions_correct.append(cur_correct.copy())
-            versions_margin.append(cur_margin.astype(np.float16))
+            new_correct, new_margin = vote_all(model, W, labels, device)
+            load_trial = t + 1 + delay
+            if kind == "oracle":
+                w = slice(load_trial, min(load_trial + vals[0], n_trials))
+                n_next = w.stop - w.start
+                parent_acc = cur_correct[w].mean() if n_next > 0 else np.nan
+                child_acc = new_correct[w].mean() if n_next > 0 else np.nan
+                accepted = n_next > 0 and child_acc > parent_acc
+                oracle_rows.append(
+                    [t, run_of[t], pos_in_run[t], n_next, f"{parent_acc:.4f}", f"{child_acc:.4f}", int(accepted), f"{secs:.3f}"]
+                )
+                if not accepted:
+                    model.load_state_dict(parent_state)
+                    trial_rows[-1][-1] = 0
+                    continue
+            versions_correct.append(new_correct.copy())
+            versions_margin.append(new_margin.astype(np.float16))
+            new_version = len(versions_correct) - 1
             tr_sizes, val_sizes = buffer.sizes()
             update_rows.append(
                 [
-                    version,
+                    new_version,
                     t,
                     run_of[t],
                     pos_in_run[t],
@@ -317,11 +379,16 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold):
                     f"{secs:.3f}",
                     sum(tr_sizes.values()),
                     sum(val_sizes.values()),
+                    load_trial,
                 ]
             )
-            if gate is not None:
-                gate.reset()
-    return trial_rows, update_rows, np.array(versions_correct), np.array(versions_margin)
+            if delay == 0:
+                version, cur_correct, cur_margin = new_version, new_correct, new_margin
+                if gate is not None:
+                    gate.reset()
+            else:
+                pending = (load_trial, new_version, new_correct, new_margin)
+    return trial_rows, update_rows, oracle_rows, np.array(versions_correct), np.array(versions_margin)
 
 
 def write_csv(path, header, rows):
@@ -331,6 +398,64 @@ def write_csv(path, header, rows):
         w.writerows(rows)
 
 
+def build_session(sub, ses, data_dir):
+    t_load = time.perf_counter()
+    runs = load_session(sub, ses, data_dir)
+    W = np.concatenate([windows_of(r["x"]) for r in runs])
+    sess = dict(
+        W=W,
+        labels=np.concatenate([r["y"] for r in runs]),
+        run_of=np.concatenate([[r["run"]] * len(r["y"]) for r in runs]),
+        pos_in_run=np.concatenate([np.arange(len(r["y"])) for r in runs]),
+        runs=[r["run"] for r in runs],
+    )
+    print(
+        f"{sub}/{ses}: runs {sess['runs']}, {len(sess['labels'])} trials, load {time.perf_counter() - t_load:.1f}s",
+        flush=True,
+    )
+    return sess
+
+
+def run_condition(args, starts, device, sub, ses, sess, cond, seeds):
+    cond_ab = CONDITION_AB[sub][0 if ses == "s1" else 1]
+    all_runs = sess["runs"]
+    adaptive_runs = set(all_runs if args.adaptive == "all" or cond_ab == "B" else all_runs[:3])
+    for seed in seeds[:1] if cond == "never" else seeds:
+        odir = os.path.join(args.out, f"{sub}_{ses}", f"{cond_name(cond)}_seed{seed}")
+        if os.path.exists(os.path.join(odir, "trials.csv")):
+            print(f"  skip {odir} (exists)", flush=True)
+            continue
+        os.makedirs(odir, exist_ok=True)
+        t0 = time.perf_counter()
+        trial_rows, update_rows, oracle_rows, vc, vm = simulate(
+            sess, starts[sub], cond, seed, adaptive_runs, device, args.threshold, args.delay
+        )
+        write_csv(
+            os.path.join(odir, "updates.csv"),
+            ["version", "after_trial", "run", "pos_in_run", "train_loss", "seconds", "n_train", "n_val", "load_trial"],
+            update_rows,
+        )
+        if oracle_rows:
+            write_csv(
+                os.path.join(odir, "oracle.csv"),
+                ["after_trial", "run", "pos_in_run", "n_next", "parent_acc", "child_acc", "accepted", "seconds"],
+                oracle_rows,
+            )
+        np.savez_compressed(os.path.join(odir, "matrix.npz"), correct=vc, margin=vm)
+        write_csv(  # trials.csv 最後寫：它存在 = 這個模擬完成
+            os.path.join(odir, "trials.csv"),
+            ["run", "pos_in_run", "t", "label", "version", "correct", "margin", "sprt_score", "sprt_decision", "finetune"],
+            trial_rows,
+        )
+        acc = np.mean([r[5] for r in trial_rows])
+        n_train = len(oracle_rows) if oracle_rows else len(update_rows)
+        print(
+            f"  {sub}_{ses} {cond_name(cond)} seed{seed}: acc {acc:.3f}, finetunes {len(update_rows)} "
+            f"(trainings {n_train}), {time.perf_counter() - t0:.1f}s",
+            flush=True,
+        )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", default=DATA_DIR)
@@ -338,6 +463,12 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--jobs", default="all", help="sub:ses,sub:ses ... or all")
     ap.add_argument("--conditions", default="never,block,always")
+    ap.add_argument(
+        "--queue",
+        default=None,
+        help="file with one 'sub:ses:condition' per line; several workers (any server, shared --out) take items in "
+        "order, each item claimed once by an atomic mkdir in --out/_claims. Overrides --jobs / --conditions.",
+    )
     ap.add_argument("--seeds", default="0,1,2,3,4")
     ap.add_argument(
         "--adaptive",
@@ -346,6 +477,7 @@ def main():
         help="all = every run may finetune; crossover = the original condition (A: runs 1-3 only)",
     )
     ap.add_argument("--threshold", type=float, default=config.FINETUNE_ACC_THRESHOLD)
+    ap.add_argument("--delay", type=int, default=0, help="trials between a finetune decision and the new weights")
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
 
@@ -357,76 +489,59 @@ def main():
     )  # 本機暫存，平行執行不互相覆蓋
     config.verbose = False
     starts = json.load(open(args.start_ckpts))
+    seeds = [int(s) for s in args.seeds.split(",")]
+    os.makedirs(args.out, exist_ok=True)
+    # 同一個 --out 裡所有結果的設定必須一致
+    sim_cfg = dict(adaptive=args.adaptive, threshold=args.threshold, delay=args.delay, start_ckpts=args.start_ckpts)
+    cfg_path = os.path.join(args.out, "sim_config.json")
+    if os.path.exists(cfg_path):
+        old = json.load(open(cfg_path))
+        if old != sim_cfg:
+            raise SystemExit(f"{cfg_path} has {old}, this call {sim_cfg}: use another --out")
+    else:
+        json.dump(sim_cfg, open(cfg_path, "w"), indent=1)
+    print(
+        f"device={device} buffer={config.REPLAY_BUFFER_LIMIT} epochs={config.adaption_epochs} "
+        f"lr={config.adaption_learning_rate} batch={config.adaption_batch_size} use_val={config.adaption_use_val} "
+        f"delay={args.delay}",
+        flush=True,
+    )
+
+    if args.queue:
+        items = []
+        for line in open(args.queue):
+            if line.strip() and not line.startswith("#"):
+                sub, ses, cond = line.strip().split(":", 2)
+                parse_condition(cond)
+                items.append((sub, ses, cond))
+        claims = os.path.join(args.out, "_claims")
+        os.makedirs(claims, exist_ok=True)
+        cache = {}
+        for sub, ses, cond in items:
+            try:
+                os.mkdir(os.path.join(claims, f"{sub}_{ses}__{cond_name(cond)}"))
+            except FileExistsError:
+                continue
+            if (sub, ses) not in cache:
+                if len(cache) >= 2:
+                    cache.pop(next(iter(cache)))
+                cache[(sub, ses)] = build_session(sub, ses, args.data_dir)
+            run_condition(args, starts, device, sub, ses, cache[(sub, ses)], cond, seeds)
+        print("queue done", flush=True)
+        return
+
     jobs = (
         [(s, ses) for s in SUBJECTS for ses in ("s1", "s2")]
         if args.jobs == "all"
         else [tuple(j.split(":")) for j in args.jobs.split(",")]
     )
-    conditions = args.conditions.split(",")
-    seeds = [int(s) for s in args.seeds.split(",")]
-    os.makedirs(args.out, exist_ok=True)
-    print(
-        f"device={device} buffer={config.REPLAY_BUFFER_LIMIT} epochs={config.adaption_epochs} "
-        f"lr={config.adaption_learning_rate} batch={config.adaption_batch_size} use_val={config.adaption_use_val}",
-        flush=True,
-    )
-
+    conditions = split_conditions(args.conditions)
+    for c in conditions:
+        parse_condition(c)
     for sub, ses in jobs:
-        t_load = time.perf_counter()
-        runs = load_session(sub, ses, args.data_dir)
-        W = np.concatenate([windows_of(r["x"]) for r in runs])
-        sess = dict(
-            W=W,
-            labels=np.concatenate([r["y"] for r in runs]),
-            run_of=np.concatenate([[r["run"]] * len(r["y"]) for r in runs]),
-            pos_in_run=np.concatenate([np.arange(len(r["y"])) for r in runs]),
-        )
-        cond_ab = CONDITION_AB[sub][0 if ses == "s1" else 1]
-        all_runs = [r["run"] for r in runs]
-        adaptive_runs = set(all_runs if args.adaptive == "all" or cond_ab == "B" else all_runs[:3])
-        print(
-            f"{sub}/{ses}: runs {all_runs}, {len(sess['labels'])} trials, load {time.perf_counter() - t_load:.1f}s",
-            flush=True,
-        )
+        sess = build_session(sub, ses, args.data_dir)
         for cond in conditions:
-            for seed in (seeds[:1] if cond == "never" else seeds):
-                odir = os.path.join(args.out, f"{sub}_{ses}", f"{cond_name(cond)}_seed{seed}")
-                if os.path.exists(os.path.join(odir, "trials.csv")):
-                    print(f"  skip {odir} (exists)", flush=True)
-                    continue
-                os.makedirs(odir, exist_ok=True)
-                t0 = time.perf_counter()
-                trial_rows, update_rows, vc, vm = simulate(
-                    sess, starts[sub], cond, seed, adaptive_runs, device, args.threshold
-                )
-                write_csv(
-                    os.path.join(odir, "updates.csv"),
-                    ["version", "after_trial", "run", "pos_in_run", "train_loss", "seconds", "n_train", "n_val"],
-                    update_rows,
-                )
-                np.savez_compressed(os.path.join(odir, "matrix.npz"), correct=vc, margin=vm)
-                write_csv(
-                    os.path.join(odir, "trials.csv"),
-                    [
-                        "run",
-                        "pos_in_run",
-                        "t",
-                        "label",
-                        "version",
-                        "correct",
-                        "margin",
-                        "sprt_score",
-                        "sprt_decision",
-                        "finetune",
-                    ],
-                    trial_rows,
-                )
-                acc = np.mean([r[5] for r in trial_rows])
-                print(
-                    f"  {cond_name(cond)} seed{seed}: acc {acc:.3f}, finetunes {len(update_rows)}, "
-                    f"{time.perf_counter() - t0:.1f}s",
-                    flush=True,
-                )
+            run_condition(args, starts, device, sub, ses, sess, cond, seeds)
 
 
 if __name__ == "__main__":

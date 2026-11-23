@@ -69,9 +69,11 @@ def main():
             m = np.load(os.path.join(d, "matrix.npz"))["correct"]
             for u in up:
                 v, t = int(u["version"]), int(u["after_trial"])
-                w = slice(t + 1, min(t + 1 + NEXT, m.shape[1]))
+                t_load = int(u.get("load_trial") or t + 1)  # --delay: 新權重從 load_trial 開始用
+                w = slice(t_load, min(t_load + NEXT, m.shape[1]))
                 if w.stop - w.start < 1:
                     continue
+                parent = int(tr[t]["version"])  # 微調時在用的模型
                 per_ft.append(
                     dict(
                         subject=sub,
@@ -81,9 +83,9 @@ def main():
                         version=v,
                         after_trial=t,
                         n_next=w.stop - w.start,
-                        parent_acc=m[v - 1, w].mean(),
+                        parent_acc=m[parent, w].mean(),
                         child_acc=m[v, w].mean(),
-                        effect=m[v, w].mean() - m[v - 1, w].mean(),
+                        effect=m[v, w].mean() - m[parent, w].mean(),
                     )
                 )
     if not per_session:
