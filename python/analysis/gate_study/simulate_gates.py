@@ -350,6 +350,8 @@ def main():
     args = ap.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    torch.backends.cudnn.deterministic = True  # 同一個 seed 重跑結果相同
+    torch.backends.cudnn.benchmark = False
     config.EEG_CHECKPOINT_TMP_BASE_FILE = (
         tempfile.mkdtemp(prefix="gate_sim_ckpt_") + os.sep
     )  # 本機暫存，平行執行不互相覆蓋
