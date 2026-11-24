@@ -2,6 +2,7 @@
 """
 Summary of a simulate_gates.py run.
 Per session x condition x seed: online accuracy (each trial voted by the model in use), accuracy per run and in runs 5-7,
+accuracy on the even trials only (acc_even, acc_late_even: the scoring set of the oraclesplit gate),
 number of finetunes, finetune seconds. Seeds are averaged per session, sessions per subject (n = subjects).
 Per finetune: child - parent vote accuracy on the next 48 trials (from matrix.npz), as F1 in plan_finetune_evaluation.md.
 Paired comparison of every condition with --ref: mean difference over subjects, bootstrap 95% CI, Wilcoxon signed-rank.
@@ -69,6 +70,9 @@ def main():
             ),
             ft_seconds=sum(float(u["seconds"]) for u in up),
             acc_late=correct[runs >= 5].mean() if (runs >= 5).any() else np.nan,
+            # 偶數 trial (全 session 編號) 的正確率：oraclesplit 的決定只看奇數 trial，偶數 trial 是它沒偷看過的評分集
+            acc_even=correct[0::2].mean(),
+            acc_late_even=correct[0::2][runs[0::2] >= 5].mean() if (runs[0::2] >= 5).any() else np.nan,
         )
         for r in sorted(set(runs)):
             row[f"acc_run{r}"] = correct[runs == r].mean()

@@ -9,6 +9,8 @@ Gates: never | always (every block end) | block[:thr] (EEG_Train._gates: >= 1 wr
        lower line) | every:k (after every k-th trial of a run) | random:q (after any trial with probability q, own RNG)
        | oracle[:n] (cheating ceiling: train at every block end, keep the new weights only if they beat the old ones on the
        next n = 48 trials, else go back to the old weights)
+       | oraclesplit[:n] (honest ceiling: as oracle, but the decision looks only at the odd trials (global index) of the
+       next n = 96 trials; score such a run on the even trials only (analyze_gates.py acc_even), which no decision saw)
        | shadow[:k,m] (causal: train at a block end, let the new model vote in the background on the next k trials, then
        use it only if it got at least m more of them right than the model in use, else go back; one candidate at a time,
        the next one is trained at the next block end; default k = 8, m = 0)
@@ -229,6 +231,8 @@ def parse_condition(c):
         return "random", [float(arg)]
     if kind == "oracle":
         return "oracle", [int(arg) if arg else 48]
+    if kind == "oraclesplit":
+        return "oraclesplit", [int(arg) if arg else 96]
     if kind == "shadow":
         k, m = ([int(v) for v in arg.split(",")] + [0])[:2] if arg else (8, 0)
         return "shadow", [k, m]
@@ -364,7 +368,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                     deferred = deferred or do_ft
                     do_ft = False
         if adaptive and block_end:
-            if kind in ("always", "oracle"):
+            if kind in ("always", "oracle", "oraclesplit"):
                 do_ft = True
             elif kind == "block":
                 do_ft = block_wrong >= 1 and run_correct / run_scored < thr
@@ -399,7 +403,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             buffer.add(to_dataset(W[idx], labels[idx], ~sim_correct[idx]))
             last_added = t + 1
         if do_ft:
-            parent_state = copy.deepcopy(model.state_dict()) if kind in ("oracle", "shadow") else None
+            parent_state = copy.deepcopy(model.state_dict()) if kind in ("oracle", "oraclesplit", "shadow") else None
             t0 = time.perf_counter()
             seed_all(GLOBAL_SEED + SEED_STEP * seed)  # 線上 _calibrate 每次微調前都重設全域種子
             with contextlib.redirect_stdout(io.StringIO()):
@@ -411,9 +415,11 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                 shadow = dict(t=t, t_dec=t + vals[0], correct=new_correct, margin=new_margin, parent=parent_state, loss=loss,
                               secs=secs, sizes=buffer.sizes())
                 continue
-            if kind == "oracle":
-                w = slice(load_trial, min(load_trial + vals[0], n_trials))
-                n_next = w.stop - w.start
+            if kind in ("oracle", "oraclesplit"):
+                w = np.arange(load_trial, min(load_trial + vals[0], n_trials))
+                if kind == "oraclesplit":  # 只看奇數 trial 決定；偶數 trial 留給評分
+                    w = w[w % 2 == 1]
+                n_next = len(w)
                 parent_acc = cur_correct[w].mean() if n_next > 0 else np.nan
                 child_acc = new_correct[w].mean() if n_next > 0 else np.nan
                 accepted = n_next > 0 and child_acc > parent_acc
