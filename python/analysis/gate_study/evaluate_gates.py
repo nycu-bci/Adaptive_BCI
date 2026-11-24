@@ -99,9 +99,7 @@ def main():
         key = (r["condition"], r["subject"], r["session"])
         for k in ("acc", "acc_late", "n_ft"):
             ses[key][k].append(float(r[k]))
-        ses[key]["n_train"].append(
-            trainings.get((r["subject"], r["session"], r["condition"], r["seed"]), float(r["n_ft"]))
-        )
+        ses[key]["n_train"].append(float(r.get("n_train") or r["n_ft"]))
         ses[key]["seeds"].append(int(r["seed"]))
     subj = collections.defaultdict(dict)  # cond -> subject -> metrics
     for (c, s, _), d in ses.items():

@@ -43,7 +43,8 @@ plt.rcParams.update(
 
 def finish(fig, ax, title, subtitle, path):
     ax.set_title(title, loc="left", fontsize=14, color=INK, pad=24, fontweight="bold")
-    ax.text(0, 1.02, subtitle, transform=ax.transAxes, fontsize=10, color=INK2, va="bottom")
+    ax.annotate(subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 6), textcoords="offset points", fontsize=10,
+                color=INK2, va="bottom")
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -193,11 +194,14 @@ def budget(eval_dir, out):
             ax.annotate(
                 name,
                 (float(r["ft_per_session"]), 100 * float(r["acc"])),
-                xytext=(6, 6),
+                xytext={"block": (-8, 16), "sprt_0.65_0.85_0.05_0.2": (6, 6), "sprt_0.5_0.75_0.05_0.2": (-30, -22)}[
+                    r["condition"]
+                ],
                 textcoords="offset points",
                 fontsize=9.5,
                 color=INK,
                 fontweight="bold",
+                arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.8),
             )
     orc = [r for r in rows if r["family"] == "oracle"]
     if orc:
@@ -282,12 +286,63 @@ def residual(eval_dir, out):
     )
 
 
+def gap_effect(per_finetune_csv, out, cond="sprt_0.65_0.85_0.05_0.2"):
+    """mean effect of a finetune by trials since the previous finetune of the same simulation"""
+    import collections
+
+    rows = list(csv.DictReader(open(per_finetune_csv)))
+    by = collections.defaultdict(list)
+    for r in rows:
+        if r["condition"] == cond:
+            by[(r["subject"], r["session"], r["seed"])].append((int(r["after_trial"]), 100 * float(r["effect"])))
+    gaps, eff = [], []
+    for v in by.values():
+        v.sort()
+        for (t0, _), (t1, e) in zip(v, v[1:]):
+            gaps.append(t1 - t0)
+            eff.append(e)
+    gaps, eff = np.array(gaps), np.array(eff)
+    bins = [(1, 2, "1–2"), (3, 4, "3–4"), (5, 8, "5–8"), (9, 16, "9–16"), (17, 40, "17–40"), (41, 10**6, "≥41")]
+    fig, ax = plt.subplots(figsize=(8, 4.6))
+    ax.set_axisbelow(True)
+    rng = np.random.default_rng(0)
+    for i, (a, b, lab) in enumerate(bins):
+        e = eff[(gaps >= a) & (gaps <= b)]
+        bs = e[rng.integers(0, len(e), (2000, len(e)))].mean(1)
+        lo, hi = np.percentile(bs, [2.5, 97.5])
+        ax.bar(i, e.mean(), width=0.62, color=BLUE, edgecolor=SURFACE, linewidth=2)
+        ax.plot([i, i], [lo, hi], color=INK2, lw=1.2)
+        ax.text(i, max(hi, 0) + 0.12, f"{e.mean():+.2f}", ha="center", fontsize=9.5, color=INK)
+        ax.text(
+            i,
+            -1.1,
+            f"n={len(e):,}\n佔 {100 * len(e) / len(eff):.0f}%",
+            ha="center",
+            fontsize=8.5,
+            color=INK2,
+            va="top",
+        )
+    ax.axhline(0, color=INK2, lw=1)
+    ax.set_xticks(range(len(bins)), [b[2] for b in bins])
+    ax.set_ylim(-2.4, 6.4)
+    ax.set_xlabel("距離上一次微調幾個 trial（= buffer 裡多了幾個新 trial）")
+    ax.set_ylabel("一次微調的效果（pp）")
+    finish(
+        fig,
+        ax,
+        "緊接著上一次的微調幾乎沒用：SPRT 有 33% 是這種",
+        "SPRT 預設，第二輪 5 seeds × 48 session；不含 session 第一次微調；線段 = 95% CI（以微調為單位）",
+        os.path.join(out, "gap_effect.png"),
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--design")
     ap.add_argument("--premise")
     ap.add_argument("--eval")
+    ap.add_argument("--per_finetune")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.design:
@@ -297,6 +352,8 @@ def main():
     if args.eval:
         budget(args.eval, args.out)
         residual(args.eval, args.out)
+    if args.per_finetune:
+        gap_effect(args.per_finetune, args.out)
 
 
 if __name__ == "__main__":
