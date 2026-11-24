@@ -32,6 +32,11 @@ def boot_ci(x, n=10000, seed=0):
 
 
 def order(c):
+    c, _, tag = c.partition("@")
+    return _order(c) + (tag,)
+
+
+def _order(c):
     if c.startswith("oraclesplit"):
         return (2, int(c.split("_")[1]))
     if c.startswith("oracle"):
@@ -42,6 +47,8 @@ def order(c):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--per_session", nargs="+", required=True)
+    ap.add_argument("--tags", nargs="+", default=None, help="one per --per_session; a condition found in several files "
+                    "is reported once per file as <condition>@<tag>")
     ap.add_argument(
         "--conditions", default="never,block,every_8,always", help="taken from the files besides all oracle*"
     )
@@ -51,15 +58,21 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     keep = set(args.conditions.split(","))
 
+    tags = args.tags or [str(i) for i in range(len(args.per_session))]
+    if len(tags) != len(args.per_session):
+        raise SystemExit("--tags needs one tag per --per_session file")
+    tables = [list(csv.DictReader(open(p))) for p in args.per_session]
+    seen = collections.Counter(c for rows in tables for c in {r["condition"] for r in rows})
     ses = collections.defaultdict(lambda: collections.defaultdict(list))
     source = {}
-    for path in args.per_session:
-        for r in csv.DictReader(open(path)):
+    for path, tag, rows in zip(args.per_session, tags, tables):
+        for r in rows:
             c = r["condition"]
             if c not in keep and not c.startswith("oracle"):
                 continue
-            if source.setdefault(c, path) != path:
-                raise SystemExit(f"{c} is in {source[c]} and {path}: rename one")
+            if seen[c] > 1:
+                c = f"{c}@{tag}"
+            source[c] = path
             for k in KEYS:
                 ses[(c, r["subject"], r["session"])][k].append(
                     float(r.get(k) or r["n_ft"]) if k == "n_train" else float(r[k])
