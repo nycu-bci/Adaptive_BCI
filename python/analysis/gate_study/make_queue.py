@@ -85,8 +85,8 @@ PHASES = {
     # 作弊上限的敏感度：oracle 偷看的 trial 數 n (3 seeds)；誠實上限 oraclesplit：只用奇數 trial 決定、偶數 trial 評分
     # (5 seeds；_48 = 跟 oracle 同樣的時間範圍，_96 = 跟 oracle 同樣用 48 個 trial 決定)。延遲 0
     "round5": [
+        (["oraclesplit:48", "oraclesplit:96"], None),  # 主要結果先跑
         (["oracle:8", "oracle:16", "oracle:24", "oracle", "oracle:96"], "0,1,2"),
-        (["oraclesplit:48", "oraclesplit:96"], None),
     ],
 }
 
