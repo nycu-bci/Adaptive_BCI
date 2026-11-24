@@ -63,8 +63,8 @@ def firing_curves(design, out):
     ax.axvspan(0.55, 0.70, color=GRID, alpha=0.6, lw=0)
     ax.text(0.625, 9.75, "第一輪模擬的正確率範圍", ha="center", va="top", fontsize=9, color=INK2)
     x, y = series("every 4")
-    ax.plot(x, y, color=MUTED, lw=2, ls="--", label="Always（每個 block）")
-    ax.text(0.952, 10, "Always", color=INK2, va="center", fontsize=10)
+    ax.plot(x, y, color=MUTED, lw=2, ls="--", label="every:4（每個 block 都微調）")
+    ax.text(0.952, 10, "every:4", color=INK2, va="center", fontsize=10)
     for g, c, lab, short, xy in [
         ("block 0.75", ORANGE, "Block gate（舊，門檻 0.75）", "Block 0.75", (0.705, 5.3)),
         ("sprt 0.65,0.85,0.05,0.2", BLUE, "SPRT 預設 0.65 / 0.85 / 0.05 / 0.2", "SPRT 預設", (0.50, 3.6)),
@@ -127,7 +127,7 @@ def premise(path_csv, out):
         fig,
         ax,
         "微調的效果幾乎不隨模型表現改變",
-        "第一輪 Always：15,730 次微調；效果 = 新模型 − 舊模型在接下來 48 個 trial 的正確率；線段 = 95% CI",
+        "第一輪 every:4：15,730 次微調；效果 = 新模型 − 舊模型在接下來 48 個 trial 的正確率；線段 = 95% CI",
         os.path.join(out, "premise.png"),
     )
 
@@ -146,11 +146,11 @@ def budget(eval_dir, out):
         marker="s",
         ms=6,
         markeredgecolor=SURFACE,
-        label="時鐘（Never、every:k、Always）",
+        label="時鐘（Never、every:k）",
     )
     for r in clock:
         ax.annotate(
-            r["condition"].replace("every_", "every:"),
+            r["condition"].replace("every_", "every:").replace("always", "every:4"),
             (float(r["ft_per_session"]), 100 * float(r["acc"])),
             xytext=(4, -12),
             textcoords="offset points",
