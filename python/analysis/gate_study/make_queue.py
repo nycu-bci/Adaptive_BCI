@@ -88,6 +88,11 @@ PHASES = {
         (["oraclesplit:48", "oraclesplit:96"], None),  # 主要結果先跑
         (["oracle:8", "oracle:16", "oracle:24", "oracle", "oracle:96"], "0,1,2"),
     ],
+    # SPRT 加最少間隔：觸發時距上次微調不足 k 個 trial 就先記著，滿 k 再做 (預設 SPRT 參數)。延遲 0；session 綁定沿用第二輪；
+    # 5 seeds。判定規則寫在 round6_sprtk_prereg.txt (跑之前)
+    "round6": [
+        ([f"sprtk:{k},{SPRT_DEFAULT.split(':')[1]}" for k in (4, 8, 12)], None),
+    ],
 }
 
 if __name__ == "__main__":

@@ -1,0 +1,32 @@
+Gate study, round 6: SPRT with a minimum gap of k new trials (sprtk:k) -- plan and decision rules, written before any result
+==========================================================================================================================
+Date written    2026-11-24, before the round 6 simulations start
+
+Gate            sprtk:k,0.65,0.85,0.05,0.2 (simulate_gates.py): the SPRT scores every trial as before. When it says
+                "finetune" but fewer than k trials came since the previous finetune (or the session start), the request is
+                kept and the finetune runs at the first trial where that gap reaches k. A later "good" does not cancel a
+                kept request; the SPRT keeps scoring meanwhile and is reset when the new weights go in. sprtk:1 = sprt.
+Conditions      k = 4, 8, 12; 5 seeds; 48 sessions; delay 0; session -> host binding copied from round 2, so every
+                session runs on the same GPU as its round 2 baselines (block, every:k, always, sprt default).
+Why             Round 2: a finetune's effect grows with the new trials since the previous one (gap <= 2: ~+0.2 pp,
+                3-4: +0.6, 5-8: +0.8, 9-12: +1.2, 13-20: +1.8), and 23% of the default SPRT's finetunes come with gap <= 2.
+                sprtb (round 4) removed part of this and gained +1.1 pp over sprt, still below every:12.
+
+Comparisons (unit = subject, n = 24; seeds averaged; analyze_gates.py + evaluate_gates.py on round 2 + round 6)
+  C1 selection at the same cadence:  sprtk_4 vs block, paired. Both act at most every 4 trials; block skips almost
+     nothing, sprtk_4 skips when the SPRT is not at its lower line. Tests whether the SPRT's skips are good skips.
+  C2 information value: residual of each sprtk_k vs the periodic clock curve at its own finetunes per session.
+  C3 paired vs block and vs every:8 / every:12 (whichever is nearest in finetunes per session).
+  C4 vs sprt default (expected > 0; shows the gap fix works, says nothing about the SPRT signal's value).
+
+Decision rules (Holm over the 3 values of k)
+  D1 information    some k has residual > 0 (Wilcoxon, Holm-adjusted p < 0.05)
+  D2 efficiency     that k is not worse than block by more than 1 pp (lower 95% CI bound > -1 pp) with >= 30% fewer
+                    finetunes than block
+  D3 superiority    some k beats block (Holm-adjusted p < 0.05, mean > 0)
+  Recommend sprtk over block / every:8 only if D3, or D1 and D2. Otherwise the round 1-4 recommendation stands.
+
+Prediction written down beforehand (Claude, 2026-11-24): residual within -1..+1 pp for every k; sprtk_8 between every:12
+and every:8 in accuracy; all sprtk below block by 0 to 1.5 pp; all above sprt default.
+Sanity checks before the run: sprtk:1 gives the same trials.csv as sprt on one session (same host); in sprtk:8 every gap
+between finetunes is >= 8.

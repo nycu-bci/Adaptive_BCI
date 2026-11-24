@@ -15,6 +15,10 @@ Gates: never | always (every block end) | block[:thr] (EEG_Train._gates: >= 1 wr
        use it only if it got at least m more of them right than the model in use, else go back; one candidate at a time,
        the next one is trained at the next block end; default k = 8, m = 0)
        | sprtb[:p0,p1,alpha,beta] (diagnostic: the SPRT decides per trial, but the finetune waits for the block end).
+       | sprtk:k[,p0,p1,alpha,beta] (SPRT with a minimum gap: when the SPRT says finetune but fewer than k trials came
+       since the previous finetune (or the session start), the request is kept and the finetune runs at the first
+       trial that makes the gap k. A kept request is not cancelled by a later "good"; the SPRT keeps scoring meanwhile
+       and is reset when the new weights go in. sprtk:1 = sprt.)
 --delay d: new weights are used from the d-th trial after the next one (online a finetune takes 2.5-14 s, a trial ~6.8 s:
        d = 1-2). The d trials in between are voted by the old model; the SPRT does not score them ("stale", as online),
        and no other finetune starts while one is pending.
@@ -236,6 +240,14 @@ def parse_condition(c):
     if kind == "shadow":
         k, m = ([int(v) for v in arg.split(",")] + [0])[:2] if arg else (8, 0)
         return "shadow", [k, m]
+    if kind == "sprtk" and arg:
+        k, _, rest = arg.partition(",")
+        vals = (
+            [float(v) for v in rest.split(",")]
+            if rest
+            else [config.SPRT_P0, config.SPRT_P1, config.SPRT_ALPHA, config.SPRT_BETA]
+        )
+        return "sprtk", [int(k)] + vals
     if kind == "sprtb":
         vals = (
             [float(v) for v in arg.split(",")]
@@ -250,7 +262,7 @@ def split_conditions(s):
     """'never,sprt:0.65,0.85,0.05,0.2,block' -> ['never', 'sprt:0.65,0.85,0.05,0.2', 'block']"""
     out = []
     for tok in s.split(","):
-        if out and re.fullmatch(r"[0-9.]+", tok) and out[-1].split(":")[0] in ("sprt", "sprtb", "shadow") and ":" in out[-1]:
+        if out and re.fullmatch(r"[0-9.]+", tok) and out[-1].split(":")[0] in ("sprt", "sprtb", "sprtk", "shadow") and ":" in out[-1]:
             out[-1] += "," + tok
         else:
             out.append(tok)
@@ -295,8 +307,9 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
     versions_correct, versions_margin = [cur_correct.copy()], [cur_margin.astype(np.float16)]
     version = 0  # matrix 的列號 = 目前在用的模型
     pending = None  # (load_trial, version, correct, margin)：已訓練、還沒換上的權重
-    gate = SprtGate(*vals) if kind in ("sprt", "sprtb") else None
-    deferred = False  # sprtb：SPRT 已判定要微調，等 block 結束
+    gate = SprtGate(*vals) if kind in ("sprt", "sprtb") else (SprtGate(*vals[1:]) if kind == "sprtk" else None)
+    deferred = False  # sprtb：SPRT 已判定要微調，等 block 結束；sprtk：等到距上次微調滿 k 個 trial
+    last_ft = -1  # sprtk：上一次微調的 trial (session 開始 = -1)
     shadow = None  # shadow：背景中的候選模型 dict
     trial_rows, update_rows, oracle_rows = [], [], []
     run_correct = run_scored = 0
@@ -356,7 +369,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
         u = rng.random()
         decision, score = "", ""
         do_ft = False
-        if adaptive and kind in ("sprt", "sprtb"):
+        if adaptive and kind in ("sprt", "sprtb", "sprtk"):
             if pending is not None:
                 decision, score = "stale", f"{gate.score:.3f}"
             else:
@@ -364,9 +377,11 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                 score = f"{gate.last_score:.3f}"
                 decision = d or ""
                 do_ft = d == "finetune"
-                if kind == "sprtb":
+                if kind in ("sprtb", "sprtk"):
                     deferred = deferred or do_ft
                     do_ft = False
+        if adaptive and kind == "sprtk":
+            do_ft = deferred and t - last_ft >= vals[0]  # t - last_ft = 上次微調之後的新 trial 數
         if adaptive and block_end:
             if kind in ("always", "oracle", "oraclesplit"):
                 do_ft = True
@@ -382,6 +397,10 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             do_ft = u < vals[0]
         if pending is not None:  # 上一次微調還沒換上：不開始新的
             do_ft = False
+        if do_ft and kind == "sprtk":
+            deferred, last_ft = False, t
+            if delay == 0:  # 新權重從下一個 trial 開始用 (延遲 > 0 時在換上權重時歸零)
+                gate.reset()
         trial_rows.append(
             [
                 run_of[t],
