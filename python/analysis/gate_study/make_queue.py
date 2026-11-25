@@ -93,6 +93,11 @@ PHASES = {
     "round6": [
         ([f"sprtk:{k},{SPRT_DEFAULT.split(':')[1]}" for k in (4, 8, 12)], None),
     ],
+    # 同 round 6，但 SPRT 參數改成 0.75 / 0.95 / 0.05 / 0.2 (觸發較多)；session 綁定沿用第二輪；5 seeds。
+    # 判定規則寫在 round7_sprtk_hi_prereg.txt (跑之前)
+    "round7": [
+        ([f"sprtk:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)], None),
+    ],
 }
 
 if __name__ == "__main__":

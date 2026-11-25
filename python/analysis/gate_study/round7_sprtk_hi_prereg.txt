@@ -1,0 +1,23 @@
+Gate study, round 7: sprtk with SPRT 0.75 / 0.95 / 0.05 / 0.2 -- plan and decision rules, written before any result
+==================================================================================================================
+Date written    2026-11-25, before the round 7 simulations start
+
+Gate            sprtk:k,0.75,0.95,0.05,0.2 (same rule as round 6, see round6_sprtk_prereg.txt; only the SPRT parameters change).
+                With these parameters a wrong trial steps the score by ln(0.05/0.25) = -1.61 and the lower line is
+                ln(0.2/0.95) = -1.56, so from a score of 0 one wrong trial is enough to ask for a finetune; a correct trial
+                steps +0.24, so about 12 correct trials in a row are needed for "good". In round 2 this setting (3 seeds) gave
+                63.2% with 63.0 finetunes per session, -1.47 pp vs block.
+Conditions      k = 4, 8, 12; 5 seeds; 48 sessions; delay 0; session -> host binding copied from round 2 (ws-4090-01 and
+                ws-5090-01, both free), so every session runs on the same GPU as its round 2 baselines.
+Why             The user asked for this setting after round 6 (which used the default 0.65 / 0.85): a gate that fires more
+                often may suffer less from the "too few finetunes for good subjects" problem seen in round 6.
+
+Comparisons and decision rules: as round 6 (C1-C4; D1-D3, Holm over the 3 values of k), evaluated on round 2 + round 7.
+  Baseline for C4 = round 2's sprt_0.75_0.95_0.05_0.2 (3 seeds there, 5 here; unit = subject, so seeds are averaged first).
+
+Prediction written down beforehand (Claude, 2026-11-25): because one wrong trial is almost always enough, the pending
+request is nearly always set when the gap reaches k, so sprtk:k here behaves close to a clock every k trials, skipping
+mainly after long runs of correct trials. Expected: finetunes per session close to (but below) every:k for k = 8, 12 and
+below always for k = 4; accuracy within 1 pp of the clock curve (residual -1..+1 pp, D1 not met); sprtk_4 within 1 pp of
+block; sprtk_8 within 1 pp of every:8. D2 may be met by sprtk_8 if it stays within 1 pp of block with <= 30.4 finetunes;
+D3 not met. Gain over round 6's default-parameter sprtk at the same k: +0.5 to +2 pp.
