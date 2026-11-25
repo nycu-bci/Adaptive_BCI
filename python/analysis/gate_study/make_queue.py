@@ -109,6 +109,11 @@ PHASES = {
     "round9": [
         (["oraclelate", "oraclelate:0.05", "block", "never"], None),
     ],
+    # 同 round 7 (sprtk，SPRT 0.75 / 0.95 / 0.05 / 0.2)，但微調只在 4-trial block 結束時做 (sprtkb)。延遲 0；session 綁定
+    # 沿用第二輪；5 seeds。判定規則寫在 round10_sprtkb_hi_prereg.txt (跑之前)
+    "round10": [
+        ([f"sprtkb:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)], None),
+    ],
 }
 
 if __name__ == "__main__":

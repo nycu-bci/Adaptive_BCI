@@ -1,0 +1,51 @@
+Gate study, round 10: sprtkb (sprtk aligned to 4-trial block ends), SPRT 0.75 / 0.95 / 0.05 / 0.2 -- plan and decision
+rules, written before any result
+======================================================================================================================
+Date written    2026-11-25, before the round 10 simulations start
+
+Gate            sprtkb:k,0.75,0.95,0.05,0.2 (simulate_gates.py). As round 7's sprtk:k: the SPRT scores every trial, a
+                "finetune" request is kept (a later "good" does not cancel it), and the finetune needs at least k new trials
+                since the previous one (or the session start). New: the finetune also waits for a 4-trial block end (trial
+                4, 8, ..., 40 of a run). It runs at the first block end at which a request is kept and the gap is >= k.
+                All finetunes fall on block ends, so the gap is always a multiple of 4. The SPRT is reset when the new
+                weights go in (and at each run start, as before). With delay 0, sprtkb:4 = sprtb (round 4).
+Conditions      k = 4, 8, 12; 5 seeds; 48 sessions; delay 0; every run adaptive; start checkpoints
+                pretrain_4fold_20261123; training settings as rounds 2-9. Session -> host binding copied from round 2, so
+                every session runs on the same GPU as its round 2 and round 7 baselines.
+Why             The user's request after reading page 12 section 2-3. Round 8's exploratory class-balance diagnostic
+                (balance_diagnostic.py): the recorded label order is balanced 4-trial blocks (98.7%), and finetunes whose
+                new data are class-imbalanced help less. Gates that finetune at block ends (block, every:4/8/12/20) get
+                balanced new data 98-99% of the time, the default SPRT only 41%. Round 7's sprtk fires at any trial.
+Hosts           ws-5090-01 is free now: its 24 sessions start at once. ws-4090-01 is running round 9 (oraclelate); its 24
+                sessions start only after round 9's tmux r9 has ended and the GPU has no process (chain script). Expected
+                about 21k finetunes, ~45 min per host.
+
+Comparisons (unit = subject, n = 24; seeds averaged per session, sessions per subject; analyze_gates.py +
+evaluate_gates.py on round 2 + round 7 + round 10)
+  C1 skip quality at the same cadence: sprtkb_4 vs block (both act only at block ends, at most every 4 trials; they
+     differ only in which block ends they skip: block skips when the run accuracy is >= 0.75 or the block had no error,
+     sprtkb_4 skips when the SPRT has not asked since the last finetune). sprtkb_8 vs every:8, sprtkb_12 vs every:12
+     (same minimum gap; the clock never skips).
+  C2 information value: residual of each sprtkb_k vs the round 2 clock curve at its own finetunes per session (as
+     rounds 6-7; the round 8 points lie above 89 finetunes and do not change the curve in this range).
+  C3 paired vs block, and vs every:8 / every:12.
+  C4 block alignment: sprtkb_k vs round 7 sprtk_k at the same k (same SPRT parameters; only the alignment differs).
+
+Decision rules (Holm over the 3 values of k), as rounds 6-7
+  D1 information    some k has residual > 0 (Wilcoxon, Holm-adjusted p < 0.05)
+  D2 efficiency     that k is not worse than block by more than 1 pp (lower 95% CI bound > -1 pp) with >= 30% fewer
+                    finetunes than block
+  D3 superiority    some k beats block (Holm-adjusted p < 0.05, mean > 0)
+  Recommend sprtkb over block / every:8 only if D3, or D1 and D2. Otherwise the round 1-4 recommendation stands.
+  C4 is reported with its own Holm correction over k; it does not change the recommendation by itself.
+
+Prediction written down beforehand (Claude, 2026-11-25): with these parameters one wrong trial is almost always enough to
+set the request, so sprtkb_k behaves like a block-end clock every k trials that skips mainly after long correct streaks.
+Finetunes per session a little below round 7 at the same k (requests now wait up to 3 more trials): about 38-43 / 24-27
+/ 17-19. Accuracy: +0.2 to +0.8 pp over round 7 at the same k (C4); sprtkb_4 within 0.5 pp of block (C1); sprtkb_8
+below every:8 by 0.3 to 0.9 pp and sprtkb_12 within 0.5 pp of every:12 (C1). Residual within -0.5..+0.5 pp, D1 not
+met; D2 met by sprtkb_8 (likely) and maybe sprtkb_12; D3 not met.
+
+Sanity checks before the run, on one ws-5090-01-bound session: sprtkb:4,0.65,0.85,0.05,0.2 gives the same trials.csv as
+round 4's sprtb_0.65_0.85_0.05_0.2 (same host, seed 0); in sprtkb:8,0.75,0.95,0.05,0.2 every finetune is at a block end
+and every gap is >= 8.
