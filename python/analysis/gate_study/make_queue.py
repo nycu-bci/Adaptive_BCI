@@ -98,6 +98,11 @@ PHASES = {
     "round7": [
         ([f"sprtk:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)], None),
     ],
+    # 時鐘曲線往左延伸：every:1/2/3 (every:4 = always，已在第二輪)。延遲 0；session 綁定沿用第二輪；5 seeds。
+    # 計畫寫在 round8_every123_plan.txt (跑之前)
+    "round8": [
+        (["every:1", "every:2", "every:3"], None),
+    ],
 }
 
 if __name__ == "__main__":
