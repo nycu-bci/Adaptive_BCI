@@ -1,0 +1,42 @@
+Round 9: late-run held-out oracle (oraclelate), ceiling only
+Written 2026-11-25, before the run.
+
+Why
+  The user's idea: judge each new model on data from when the subject is proficient, not on the next 48 trials (round 5:
+  that oracle mostly picks short-term noise). run_separability.py (separability_20261125) supports the premise in part:
+  within-run CSP + LDA (Common Spatial Pattern + Linear Discriminant Analysis) accuracy rises from 57.5% (run 1) to
+  64-66% (runs 4-6) and dips in run 7 (62.8%), and the patterns drift. This round asks: with hindsight access to the
+  late runs, does choosing finetunes by them beat Block on trials it did not look at? If not, the idea is dropped.
+  Only this ceiling is run (the user's choice); a deployable s1 -> s2 version is not.
+
+Design
+  Judge set A, per session: in each of runs 4, 5, 6, half of each class's trials (10 of 20), drawn once at random,
+  seeded by subject and session (simulate_gates.late_judge_mask); the same A for every condition and seed. 60 trials
+  in a full session. Written to judge.csv in each oraclelate output folder.
+  oraclelate (tol 0, strict): train at every block end (as always); keep the new weights only if their balanced accuracy
+    on A is strictly higher than the model in use; else go back.
+  oraclelate:0.05 (lenient): keep the new weights unless their balanced accuracy on A is lower by more than 5 pp.
+  Only A trials from the new model's first trial in use on are used (earlier A trials are in its training data, the
+  buffer holds every past trial). Fewer than 10 such trials (late run 6, run 7): strict does not adopt, lenient adopts.
+  Balanced accuracy (mean of the two class accuracies), because round 5 showed a class-mix bias in the judging trials.
+  Same host for the reference: block and never are rerun in this round. Seeds 0-4, delay 0, every run adaptive,
+  start checkpoints pretrain_4fold_20261123, training settings as rounds 2-8.
+  Host: ws-4090-01 only (the user's choice), 4 workers. 480 oraclelate simulations of about 70 trainings each, plus
+  block and never: about 3 h.
+
+Scoring and analysis (late_oracle_report.py)
+  Score = accuracy on the trials outside A (runs 1-3, the other half of runs 4-6 = B, run 7), the same trials for every
+  condition. Unit = subject (seeds averaged per session, sessions per subject), n = 24, paired difference vs block of
+  this round, bootstrap 95% CI, Wilcoxon signed-rank.
+  Also reported, descriptive: the same without run 7; run 7 only (partly set by the default rule, see above);
+  runs 1-3 only; B only; adopted finetunes and trainings per session; round 2's always, every:8 and oracle on the same
+  trials (other hosts for half of the sessions: noise, not bias).
+
+Decision rule (written before the run)
+  The idea is worth a deployable version if oraclelate or oraclelate:0.05 beats block on the score with the lower 95% CI
+  bound above 0. Two conditions are tested: a result with p between 0.025 and 0.05 is reported as weak.
+  Otherwise (both CIs include 0 or are below it) even hindsight access to the late runs does not choose better
+  finetunes than Block, and the late-run judge is dropped.
+
+Prediction (written before the run)
+  Neither beats block by more than 1 pp. Strict adopts fewer finetunes than block; lenient lands within 1 pp of always.

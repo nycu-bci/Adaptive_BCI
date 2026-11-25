@@ -11,6 +11,12 @@ Gates: never | always (every block end) | block[:thr] (EEG_Train._gates: >= 1 wr
        next n = 48 trials, else go back to the old weights)
        | oraclesplit[:n] (honest ceiling: as oracle, but the decision looks only at the odd trials (global index) of the
        next n = 96 trials; score such a run on the even trials only (analyze_gates.py acc_even), which no decision saw)
+       | oraclelate[:tol] (late-run ceiling: train at every block end; judge set A = per session, in each of runs 4-6, half
+       of each class's trials, drawn once at random (seeded by subject and session, same for every condition and seed;
+       written to judge.csv). A candidate is judged only on the A trials from its first trial in use on (earlier A
+       trials are in its training data), by balanced accuracy (mean of the two classes' accuracies). tol = 0: keep the new
+       weights only if strictly better than the old ones; tol > 0: keep them unless worse by more than tol. Fewer than
+       10 A trials left: tol = 0 does not adopt, tol > 0 adopts. Score such a run on the trials outside A only)
        | shadow[:k,m] (causal: train at a block end, let the new model vote in the background on the next k trials, then
        use it only if it got at least m more of them right than the model in use, else go back; one candidate at a time,
        the next one is trained at the next block end; default k = 8, m = 0)
@@ -185,6 +191,24 @@ def load_session(sub, ses, data_dir):
     return runs
 
 
+LATE_JUDGE_RUNS, LATE_JUDGE_MIN = (4, 5, 6), 10
+
+
+def late_judge_mask(sub, ses, labels, run_of):
+    """oraclelate 的判斷集 A：runs 4-6 每個 run 每一類隨機抽一半 (固定種子：受試者、session)"""
+    rng = np.random.default_rng([int(sub), 1 if ses == "s1" else 2, 20261125])
+    mask = np.zeros(len(labels), dtype=bool)
+    for r in LATE_JUDGE_RUNS:
+        for c in (0, 1):
+            idx = np.where((run_of == r) & (labels == c))[0]
+            mask[rng.choice(idx, len(idx) // 2, replace=False)] = True
+    return mask
+
+
+def balanced_acc(correct, labels):
+    return np.mean([correct[labels == c].mean() for c in (0, 1) if (labels == c).any()])
+
+
 # ---------------- model ----------------
 def seed_all(seed):
     random.seed(seed)
@@ -237,6 +261,8 @@ def parse_condition(c):
         return "oracle", [int(arg) if arg else 48]
     if kind == "oraclesplit":
         return "oraclesplit", [int(arg) if arg else 96]
+    if kind == "oraclelate":
+        return "oraclelate", [float(arg) if arg else 0.0]
     if kind == "shadow":
         k, m = ([int(v) for v in arg.split(",")] + [0])[:2] if arg else (8, 0)
         return "shadow", [k, m]
@@ -383,7 +409,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
         if adaptive and kind == "sprtk":
             do_ft = deferred and t - last_ft >= vals[0]  # t - last_ft = 上次微調之後的新 trial 數
         if adaptive and block_end:
-            if kind in ("always", "oracle", "oraclesplit"):
+            if kind in ("always", "oracle", "oraclesplit", "oraclelate"):
                 do_ft = True
             elif kind == "block":
                 do_ft = block_wrong >= 1 and run_correct / run_scored < thr
@@ -422,7 +448,9 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             buffer.add(to_dataset(W[idx], labels[idx], ~sim_correct[idx]))
             last_added = t + 1
         if do_ft:
-            parent_state = copy.deepcopy(model.state_dict()) if kind in ("oracle", "oraclesplit", "shadow") else None
+            parent_state = (
+                copy.deepcopy(model.state_dict()) if kind in ("oracle", "oraclesplit", "oraclelate", "shadow") else None
+            )
             t0 = time.perf_counter()
             seed_all(GLOBAL_SEED + SEED_STEP * seed)  # 線上 _calibrate 每次微調前都重設全域種子
             with contextlib.redirect_stdout(io.StringIO()):
@@ -442,6 +470,23 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
                 parent_acc = cur_correct[w].mean() if n_next > 0 else np.nan
                 child_acc = new_correct[w].mean() if n_next > 0 else np.nan
                 accepted = n_next > 0 and child_acc > parent_acc
+                oracle_rows.append(
+                    [t, run_of[t], pos_in_run[t], n_next, f"{parent_acc:.4f}", f"{child_acc:.4f}", int(accepted), f"{secs:.3f}"]
+                )
+                if not accepted:
+                    model.load_state_dict(parent_state)
+                    trial_rows[-1][-1] = 0
+                    continue
+            if kind == "oraclelate":  # 只用換上之後才出現的 A trial (之前的 A trial 已在訓練資料裡)
+                w = np.where(sess["late_judge"] & (np.arange(n_trials) >= load_trial))[0]
+                n_next = len(w)
+                enough = n_next >= LATE_JUDGE_MIN
+                parent_acc = balanced_acc(cur_correct[w], labels[w]) if n_next else np.nan
+                child_acc = balanced_acc(new_correct[w], labels[w]) if n_next else np.nan
+                if vals[0] == 0:
+                    accepted = enough and child_acc > parent_acc + 1e-9
+                else:
+                    accepted = (not enough) or child_acc >= parent_acc - vals[0] - 1e-9
                 oracle_rows.append(
                     [t, run_of[t], pos_in_run[t], n_next, f"{parent_acc:.4f}", f"{child_acc:.4f}", int(accepted), f"{secs:.3f}"]
                 )
@@ -495,6 +540,7 @@ def build_session(sub, ses, data_dir):
         pos_in_run=np.concatenate([np.arange(len(r["y"])) for r in runs]),
         runs=[r["run"] for r in runs],
     )
+    sess["late_judge"] = late_judge_mask(sub, ses, sess["labels"], sess["run_of"])
     print(
         f"{sub}/{ses}: runs {sess['runs']}, {len(sess['labels'])} trials, load {time.perf_counter() - t_load:.1f}s",
         flush=True,
@@ -528,6 +574,8 @@ def run_condition(args, starts, device, sub, ses, sess, cond, seeds):
                 oracle_rows,
             )
         np.savez_compressed(os.path.join(odir, "matrix.npz"), correct=vc, margin=vm)
+        if cond.startswith("oraclelate"):
+            write_csv(os.path.join(odir, "judge.csv"), ["t"], [[int(i)] for i in np.where(sess["late_judge"])[0]])
         write_csv(  # trials.csv 最後寫：它存在 = 這個模擬完成
             os.path.join(odir, "trials.csv"),
             ["run", "pos_in_run", "t", "label", "version", "correct", "margin", "sprt_score", "sprt_decision", "finetune"],

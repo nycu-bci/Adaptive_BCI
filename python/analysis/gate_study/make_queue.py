@@ -103,6 +103,12 @@ PHASES = {
     "round8": [
         (["every:1", "every:2", "every:3"], None),
     ],
+    # 後期判斷的上限 (oraclelate)：用 runs 4-6 每類一半 (A) 判斷新模型，在 A 以外的 trial 評分；嚴格 (tol 0) 與寬鬆
+    # (差超過 5 pp 才不採用)。Block / Never 在同一台主機上重跑，主要比較不混進硬體差異。延遲 0；5 seeds；只在一台主機。
+    # 計畫與判定規則寫在 round9_oraclelate_plan.txt (跑之前)
+    "round9": [
+        (["oraclelate", "oraclelate:0.05", "block", "never"], None),
+    ],
 }
 
 if __name__ == "__main__":
