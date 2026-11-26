@@ -1,0 +1,72 @@
+Gate study, vote check V2: rerun under a replica of the online trial vote -- plan and decision rules, written before
+any V2 result
+======================================================================================================================
+Date written    2026-11-26, after V0 / V1 (below), before the V2 simulations start
+
+Question        All rounds so far judge a trial by the simulator's 16-window majority (16 windows of 500 samples, stride
+                100, over the [START, START + 4 s) epoch, equal weights, tie = wrong). Online, Python predicts
+                continuously on the last 1 s (band-pass, then CAR) and Unity votes on the last 100 predictions with
+                linear weights 1 -> 5 when it swings at the brain-controlled 5th note (VR_BCI handover code:
+                EEGPrediction.py, AutoSaber.cs, TCP_Client.cs). Does the claim "every:4 (= always) beats every SPRT
+                variant we tested" survive when trials are judged the online way?
+
+Replica         online_vote.py, simulate_gates.py --vote unity --vote_rate 70 --vote_lead 0.3. EEG stream = the run's
+                eeg_record CSV (times from the header's Record datetime, UTC+8; the [START, +2000) cut equals mi_22.pt
+                exactly). Vote time = the brain note's CUT - 0.3 s (failed trial: 4th note's CUT + the run's median
+                4th -> 5th gap, else START + the run's median START -> 5th offset); prediction j ends at vote time -
+                (99 - j) / 70 s. 70 / s is the old config comment; 0.3 s is about Unity's swing (0.2-0.41 s) before
+                the CUT is logged. Both were fixed before V0's grid was looked at. The replica's judgement feeds the
+                gate, the failed-trial x2 weight and the score; training windows stay the 16 per trial (as online).
+
+V0 (done)       Can the replica reproduce the logged outcomes? Only the start checkpoint c_000.pth survives (13-channel
+                ShallowFBCSPNet; later c_0xx were overwritten), so only the 273 run-1 trials voted while c_000 was
+                loaded (46 sessions) can be replayed. Ground truth = the brain note's CUT logged (told apart by time:
+                non-brain notes are also missed 4-6 % each). Result: neither vote reproduces the log. Replica best of
+                420 grid settings 0.751 agreement (kappa 0.50), a priori 70 Hz / 0.3 s 0.700 (0.40); 16-window 0.711
+                (0.42). Even on trials where the model is sure (weighted share > 0.8 or < 0.2) only 0.75. Controls:
+                13c_s_g.pth about the same (0.70-0.74); 13c_s_random.pth (predicts one class) 0.630 (kappa 0.26), because
+                the logged success depends on the label. So the NAS c_000.pth is not the weights that ran in March, and
+                V0 cannot calibrate rate / lead (flat between 15 and 100 / s). Limitation stated, not fixable.
+                Also found: Unity's ReceiveLoop keeps a TCP read only if it is exactly "0" or "1", so predictions that
+                arrive together are dropped; the effective rate is below 70 / s and irregular.
+V1 (done)       Start models, no finetune, 13,160 trials: replica 70 / 0.3 vs 16-window agree on 79.9 % of trials
+                (kappa 0.59); replica accuracy +4.35 pp [+3.23, +5.45] (it looks at the late part of the trial);
+                subject rank correlation 0.96. Gate firing on the same correctness sequences: block same trial
+                (Jaccard) 0.80, SPRT 0.65/0.85 0.19, SPRT 0.75/0.95 0.41; the SPRT fires 20 % less. Other settings
+                (20 / 0.9, 40 / 0.3, 70 / 0, 70 / 0.6): agreement 0.77-0.85, accuracy +3.3..+4.5 pp, same picture.
+                So the vote changes which trials the SPRT fires on a lot: V2 is needed.
+
+Phase a         The claim, 3 seeds (0, 1, 2), 48 sessions, delay 0, every run adaptive, start checkpoints
+                pretrain_4fold_20261123, training as rounds 2-10. make_queue.py v2a, 12 conditions:
+                never; always (= every:4); sprtkb:4/8/12 and sprtk:4/8/12 with SPRT 0.75/0.95/0.05/0.2 (the best SPRT
+                variants so far: 65.0 / 64.5 / 64.1 and 64.0 / 64.3 / 64.1 %); SPRT 0.65/0.85/0.05/0.2 (the online
+                default); SPRT 0.55/0.95/0.05/0.2 and 0.75/0.95/0.05/0.2 (the best plain SPRTs, 63.4 / 63.2 %); sprtb
+                0.65/0.85/0.05/0.2 (63.2 %). Under the 16-window vote every:4 is 65.8 %, above all of them.
+                New out folder, new session -> host binding (first claim); all conditions of a session on one host.
+Phase b         The rest, same vote, separate out folder with phase a's host binding (make_queue.py v2b): seeds 3-4 of
+                phase a; the other round 2 conditions (block, block:0.65/0.85, every:6/8/12/20, random:0.05/0.1/0.15,
+                SPRT 0.5/0.75; 5 seeds) and the 17 other round 2 SPRT settings (3 seeds, as round 2); round 6 sprtk:4/8/12
+                with the default SPRT (5 seeds); round 8 every:1/2/3 (5 seeds). Not rerun: oracle*, shadow, delay 2.
+
+Analysis unit   subject (n = 24): seeds averaged per session, sessions per subject; paired differences, 95 % bootstrap
+                CI, Wilcoxon signed-rank. Scripts: analyze_gates.py, evaluate_gates.py, v2 decision script.
+
+Decision rules, phase a (seeds 0-2)
+  P1  For each of the 10 SPRT variants X: always - X, Wilcoxon p Holm-adjusted over the 10. The claim holds under the
+      online vote if every X has mean > 0 and Holm p < 0.05. A variant with mean > 0 but Holm p >= 0.05 is "not shown
+      yet" and is judged again with 5 seeds after phase b. A variant with mean <= 0 means the claim fails for it.
+  P2  How much the vote moves each gap: D_X = (always - X | replica) - (always - X | 16-window), the 16-window values
+      from rounds 2 / 4 / 6-7 / 10 with the same seeds 0-2. Mean and 95 % bootstrap CI over subjects. Reported, not
+      pass / fail. (The 16-window runs are partly on other hosts: hardware noise, no bias.)
+  Also reported: accuracy and finetunes per session of every condition, never, per-subject wins.
+Phase b         P1 again with 5 seeds (final); the round 2 evaluation (clock-curve residuals, H1-H3) under the replica.
+
+Prediction written down beforehand (Claude, 2026-11-26): accuracies about +3 to +4 pp over the 16-window rounds (V1's
+start-model shift, a little smaller after finetuning). The SPRT variants fire somewhat less (higher accuracy), so their
+budgets shrink; always is a clock and keeps 68.5 finetunes. P1 holds for the 6 plain SPRT / sprtk / sprtb variants with
+large margins (>= 1.5 pp); sprtkb:8 and sprtkb:12 pass; sprtkb:4 (16-window gap -0.83 pp) is the one most likely to be
+"not shown yet" with 3 seeds. |D_X| < 1 pp for most X, with D_X > 0 (gap wider) for the plain SPRTs.
+
+Sanity checks before the run: (1) the new simulate_gates.py with --vote majority16 reproduces round 2's trials.csv for
+SPRT 0.65/0.85/0.05/0.2, seed 0, on one session, on its round 2 host (byte-identical). (2) --vote unity never on 35_s1
+gives V1's u70_0.3 start-model accuracy for that session (0.550).

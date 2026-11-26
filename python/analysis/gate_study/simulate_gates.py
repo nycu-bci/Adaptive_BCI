@@ -38,6 +38,10 @@ buffer at every finetune and at every 4-trial block end, whatever the gate; the 
 Data: run{N}/mi_22.pt is stored in arrange_by_label order (0,1,0,1 ...). It is put back in recorded order with the labels
 of the run's log (checked against CSV re-cuts: identical). Windows: 16 per trial (500 samples, stride 100), CAR then
 1-40 Hz band-pass, as prepare_calibration_dataset. Trial vote: majority of the 16 window predictions, a tie is wrong.
+--vote unity (V2 of the vote check): the trial is judged instead by the replica of the online vote (online_vote.py: the
+       last 100 predictions of a continuous 1-s window stream from the run's eeg_record CSV, --vote_rate per second,
+       Unity's 1 -> 5 linear weights, voted --vote_lead s before the brain-controlled note's CUT). That judgement feeds
+       the gates, the failed-trial weight and the score; the training windows stay the 16 per trial, as online.
 
 Outputs in --out/<subject>_<session>/<condition>_seed<k>/: trials.csv, updates.csv, matrix.npz
 (every model version's correct / margin on every trial of the session, for parent-vs-child analyses).
@@ -74,6 +78,9 @@ from main.Utils import preprocess  # noqa: E402
 from main.Utils.sprt_gate import SprtGate  # noqa: E402
 from main.EEG.MI_train import ReplayBuffer, OnlineCalibrationTrainer  # noqa: E402
 from main.EEG.models import SCCNet  # noqa: E402
+import online_vote  # noqa: E402
+
+VOTE = dict(mode="majority16", rate=70.0, lead=0.3)  # set from --vote / --vote_rate / --vote_lead in main()
 
 DATA_DIR = "/mnt/project/MIEXP/DATA_Cygnus"
 SUBJECTS = [
@@ -236,6 +243,43 @@ def vote_all(model, W, labels, device, bs=4096):
     return correct, hits / n
 
 
+@torch.no_grad()
+def vote_unity(model, V, labels, device, bs=4096):
+    """replica of the online vote: V (trial, 100, ch, 500) prepared windows, oldest first -> correct, margin"""
+    model.eval()
+    flat = torch.from_numpy(V.reshape(-1, *V.shape[2:]))
+    preds = []
+    for i in range(0, len(flat), bs):
+        preds.append(model(flat[i : i + bs].to(device)).argmax(1).cpu())
+    P = torch.cat(preds).numpy().reshape(V.shape[0], V.shape[1])
+    return online_vote.unity_correct(P, labels)
+
+
+def vote_session(model, sess, device):
+    if "V" in sess:
+        return vote_unity(model, sess["V"], sess["labels"], device)
+    return vote_all(model, sess["W"], sess["labels"], device)
+
+
+def unity_windows(sub, ses, data_dir, runs):
+    """(trial, 100, 22, 500) windows of the online vote replica, in the session's trial order"""
+    chans = config.CHANNEL_DEFINITIONS["22"]
+    streams = [online_vote.read_stream(os.path.join(data_dir, sub, ses, f"run{r['run']}")) for r in runs]
+    fallback = online_vote.vote_refs([t for st in streams for t in st[3]])[2]
+    out = []
+    for r, (ts, X, rec, trials) in zip(runs, streams):
+        lab = np.array([t["label"] for t in trials])
+        if len(lab) != len(r["y"]) or not (lab == r["y"]).all():
+            raise RuntimeError(f"{sub}/{ses}/run{r['run']}: CSV log trials differ from mi_22")
+        err = np.abs(online_vote.epoch_from_stream(ts, X, rec, trials, chans, r["x"].shape[2]) - r["x"]).max()
+        if err > 1e-3:
+            raise RuntimeError(f"{sub}/{ses}/run{r['run']}: stream epoch != mi_22 (max err {err})")
+        refs = online_vote.vote_refs(trials, fallback)[0]
+        ends = online_vote.vote_ends(ts, rec, refs, VOTE["lead"], VOTE["rate"])
+        out.append(online_vote.prep_windows(X, ends, chans).reshape(len(trials), ends.shape[1], len(chans), -1))
+    return np.concatenate(out)
+
+
 def to_dataset(W, labels, fails):
     X = torch.from_numpy(W.reshape(-1, *W.shape[2:]))
     y = torch.from_numpy(np.repeat(labels, W.shape[1])).long()
@@ -332,7 +376,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
     model = trainer.model
     buffer = ReplayBuffer(limit=config.REPLAY_BUFFER_LIMIT, use_val=config.adaption_use_val)
 
-    cur_correct, cur_margin = vote_all(model, W, labels, device)
+    cur_correct, cur_margin = vote_session(model, sess, device)
     versions_correct, versions_margin = [cur_correct.copy()], [cur_margin.astype(np.float16)]
     version = 0  # matrix 的列號 = 目前在用的模型
     pending = None  # (load_trial, version, correct, margin)：已訓練、還沒換上的權重
@@ -461,7 +505,7 @@ def simulate(sess, start_ckpt, cond, seed, adaptive_runs, device, threshold, del
             with contextlib.redirect_stdout(io.StringIO()):
                 loss = trainer.train(buffer.train_set(), buffer.val_set())
             secs = time.perf_counter() - t0
-            new_correct, new_margin = vote_all(model, W, labels, device)
+            new_correct, new_margin = vote_session(model, sess, device)
             load_trial = t + 1 + delay
             if kind == "shadow":
                 shadow = dict(t=t, t_dec=t + vals[0], correct=new_correct, margin=new_margin, parent=parent_state, loss=loss,
@@ -546,6 +590,8 @@ def build_session(sub, ses, data_dir):
         runs=[r["run"] for r in runs],
     )
     sess["late_judge"] = late_judge_mask(sub, ses, sess["labels"], sess["run_of"])
+    if VOTE["mode"] == "unity":
+        sess["V"] = unity_windows(sub, ses, data_dir, runs)
     print(
         f"{sub}/{ses}: runs {sess['runs']}, {len(sess['labels'])} trials, load {time.perf_counter() - t_load:.1f}s",
         flush=True,
@@ -619,7 +665,11 @@ def main():
     ap.add_argument("--threshold", type=float, default=config.FINETUNE_ACC_THRESHOLD)
     ap.add_argument("--delay", type=int, default=0, help="trials between a finetune decision and the new weights")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--vote", default="majority16", choices=["majority16", "unity"])
+    ap.add_argument("--vote_rate", type=float, default=70.0, help="--vote unity: predictions per second")
+    ap.add_argument("--vote_lead", type=float, default=0.3, help="--vote unity: vote time before the brain note's CUT (s)")
     args = ap.parse_args()
+    VOTE.update(mode=args.vote, rate=args.vote_rate, lead=args.vote_lead)
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     torch.backends.cudnn.deterministic = True  # 同一個 seed 重跑結果相同
@@ -633,6 +683,8 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     # 同一個 --out 裡所有結果的設定必須一致
     sim_cfg = dict(adaptive=args.adaptive, threshold=args.threshold, delay=args.delay, start_ckpts=args.start_ckpts)
+    if args.vote != "majority16":  # old --out folders have no vote key
+        sim_cfg.update(vote=args.vote, vote_rate=args.vote_rate, vote_lead=args.vote_lead)
     cfg_path = os.path.join(args.out, "sim_config.json")
     if os.path.exists(cfg_path):
         old = json.load(open(cfg_path))
@@ -643,7 +695,7 @@ def main():
     print(
         f"device={device} buffer={config.REPLAY_BUFFER_LIMIT} epochs={config.adaption_epochs} "
         f"lr={config.adaption_learning_rate} batch={config.adaption_batch_size} use_val={config.adaption_use_val} "
-        f"delay={args.delay}",
+        f"delay={args.delay} vote={VOTE}",
         flush=True,
     )
 

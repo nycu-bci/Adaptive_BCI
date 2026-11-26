@@ -114,6 +114,70 @@ PHASES = {
     "round10": [
         ([f"sprtkb:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)], None),
     ],
+    # V2 of the vote check: --vote unity (replica of the online vote). Plan and decision rule in v2_vote_prereg.txt
+    # (written before the run). Phase a = the claim "every:4 beats every SPRT we tested": every:4 (= always) against
+    # the strongest SPRT variants of rounds 2, 4, 6-7 and 10 and the online default; 3 seeds.
+    "v2a": [
+        (
+            ["never", "always"]
+            + [f"sprtkb:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)]
+            + [f"sprtk:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)]
+            + [SPRT_DEFAULT, "sprt:0.55,0.95,0.05,0.2", "sprt:0.75,0.95,0.05,0.2", "sprtb:0.65,0.85,0.05,0.2"],
+            "0,1,2",
+        ),
+    ],
+    # Phase b = the rest of the study under the same vote (separate --out, session binding copied from phase a):
+    # seeds 3-4 of phase a, the other round 2 conditions (5 seeds; the SPRT grid 3 seeds as in round 2), round 6
+    # sprtk with the default SPRT, round 8 every:1-3. Ceilings (oracle*, shadow) and delay 2 are not rerun.
+    "v2b": [
+        (
+            ["always"]
+            + [f"sprtkb:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)]
+            + [f"sprtk:{k},0.75,0.95,0.05,0.2" for k in (4, 8, 12)]
+            + [SPRT_DEFAULT, "sprt:0.55,0.95,0.05,0.2", "sprt:0.75,0.95,0.05,0.2", "sprtb:0.65,0.85,0.05,0.2"],
+            "3,4",
+        ),
+        (
+            [
+                "block",
+                "every:6",
+                "every:8",
+                "every:12",
+                "every:20",
+                "random:0.05",
+                "random:0.1",
+                "random:0.15",
+                "block:0.65",
+                "block:0.85",
+                "sprt:0.5,0.75,0.05,0.2",
+            ]
+            + [f"sprtk:{k},{SPRT_DEFAULT.split(':')[1]}" for k in (4, 8, 12)],
+            "0,1,2,3,4",
+        ),
+        (
+            [
+                "sprt:0.5,0.7,0.05,0.2",
+                "sprt:0.55,0.75,0.05,0.2",
+                "sprt:0.6,0.8,0.05,0.2",
+                "sprt:0.7,0.9,0.05,0.2",
+                "sprt:0.6,0.9,0.05,0.2",
+                "sprt:0.7,0.8,0.05,0.2",
+                "sprt:0.65,0.85,0.01,0.2",
+                "sprt:0.65,0.85,0.1,0.2",
+                "sprt:0.65,0.85,0.2,0.2",
+                "sprt:0.65,0.85,0.05,0.05",
+                "sprt:0.65,0.85,0.05,0.1",
+                "sprt:0.65,0.85,0.05,0.3",
+                "sprt:0.65,0.85,0.05,0.4",
+                "sprt:0.65,0.9,0.01,0.3",
+                "sprt:0.6,0.85,0.01,0.4",
+                "sprt:0.7,0.85,0.01,0.4",
+                "sprt:0.7,0.8,0.01,0.3",
+            ],
+            "0,1,2",
+        ),
+        (["every:3", "every:2", "every:1"], "0,1,2,3,4"),
+    ],
 }
 
 if __name__ == "__main__":
