@@ -5,7 +5,7 @@
 Does the trial vote matter? (gate study V0 / V1; online_vote.py has the replica of the online vote)
 
 V0  Is the replica of the online vote right? The only online model we still have is the start checkpoint c_000.pth
-    (= 13c_s_g_all.pth, braindecode ShallowFBCSPNet, 13 channels); every later c_0xx was overwritten. Each session's
+    (= 13c_s_g_all.pth, braindecode ShallowFBCSPNet, 13 channels); later c_0xx stayed on the experiment PC (D:\...\checkpoint_main), not on the NAS. Each session's
     run 1 trials voted while c_000 was loaded (session log.txt: before the first update_check_point to another file)
     are replayed with c_000 under the replica (grid over prediction rate, vote lead, with / without CAR) and under the
     simulator's 16-window majority, and compared with what was logged (5th CUT = success).

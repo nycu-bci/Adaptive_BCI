@@ -70,3 +70,7 @@ large margins (>= 1.5 pp); sprtkb:8 and sprtkb:12 pass; sprtkb:4 (16-window gap 
 Sanity checks before the run: (1) the new simulate_gates.py with --vote majority16 reproduces round 2's trials.csv for
 SPRT 0.65/0.85/0.05/0.2, seed 0, on one session, on its round 2 host (byte-identical). (2) --vote unity never on 35_s1
 gives V1's u70_0.3 start-model accuracy for that session (0.550).
+
+Erratum (2026-11-26, after phase a started; no rule changed): "later c_0xx were overwritten" in V0 is imprecise. The
+session logs load c_0xx from the experiment PC (D:\...\checkpoint_main); they were never copied to the NAS, whose
+checkpoint_main is the 2026-07-15 handover snapshot (c_000 = 13c_s_g_all = model.pth). Same consequence for V0.
